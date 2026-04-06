@@ -1,0 +1,4 @@
+moviebox-api>=0.4.0
+fastapi
+uvicorn
+strenum
