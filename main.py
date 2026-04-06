@@ -46,11 +46,14 @@ async def search(q: str = Query(..., min_length=1)):
         
         movies = []
         for item in results.items[:20]:
+            # Handle genre - it's already a list, not a string
+            genres = item.genre if isinstance(item.genre, list) else (item.genre.split(',') if item.genre else [])
+            
             movies.append({
                 "title": item.title,
                 "year": item.releaseDate.year if item.releaseDate else None,
                 "rating": item.imdbRatingValue,
-                "genres": item.genre.split(',') if item.genre else [],
+                "genres": genres,
                 "poster": item.cover.url if item.cover else None,
                 "detailPath": item.detailPath
             })
@@ -70,6 +73,11 @@ async def get_movie(detailPath: str):
         stars = data.get('stars', [])
         trailer = subject.get('trailer', {}).get('videoAddress', {}).get('url')
         
+        # Handle genre - it might be string or list
+        genre = subject.get('genre', [])
+        if isinstance(genre, str):
+            genre = genre.split(',')
+        
         return {
             "success": True,
             "title": subject.get('title'),
@@ -78,6 +86,7 @@ async def get_movie(detailPath: str):
             "description": subject.get('description'),
             "trailer": trailer,
             "poster": subject.get('cover', {}).get('url'),
+            "genres": genre,
             "cast": [{"name": s.get('name'), "character": s.get('character')} for s in stars[:10]]
         }
     except Exception as e:
