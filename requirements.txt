@@ -1,4 +1,4 @@
 moviebox-api>=0.4.0
-fastapi
-uvicorn
-strenum
+fastapi==0.115.0
+uvicorn==0.30.0
+strenum==0.4.15
