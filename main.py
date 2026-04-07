@@ -102,3 +102,8 @@ if __name__ == "__main__":
 from music.router import router as music_router
 
 app.include_router(music_router)
+
+# Import anime router
+from anime.router import router as anime_router
+
+app.include_router(anime_router)
