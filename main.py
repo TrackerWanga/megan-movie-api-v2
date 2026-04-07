@@ -17,7 +17,8 @@ if not hasattr(enum, 'StrEnum'):
         enum.StrEnum = StrEnum
 
 from moviebox_api.v2 import Search, Session
-from moviebox_api.v2.download import DownloadableSingleFilesDetail
+from moviebox_api.v2.download import DownloadableSingleFilesDetail, DownloadableTVSeriesFilesDetail
+from moviebox_api.v2.core import SubjectType
 
 app = FastAPI(title="Megan Movie API", version="2.0.0")
 
@@ -35,6 +36,14 @@ OMDB_URL = "http://www.omdbapi.com/"
 VIDSRC_API_URL = "https://megan-vidsrc.vercel.app"
 
 session = Session()
+
+def is_tv_series(item) -> bool:
+    """Check if item is a TV series (subjectType 2)"""
+    return item.subjectType == SubjectType.TV_SERIES
+
+def is_movie(item) -> bool:
+    """Check if item is a movie (subjectType 1)"""
+    return item.subjectType == SubjectType.MOVIES
 
 async def get_omdb_data(imdb_id: str = None, title: str = None, year: int = None):
     """Get OMDb metadata"""
@@ -71,12 +80,12 @@ async def get_vidsrc_streams(imdb_id: str):
 
 @app.get("/api/movie/{title}")
 async def get_movie(title: str, year: Optional[int] = None):
-    """Get COMPLETE movie data with ALL metadata"""
+    """Get COMPLETE movie/TV series data with ALL metadata"""
     try:
         # 1. Get OMDb data
         omdb = await get_omdb_data(title=title, year=year)
         if not omdb:
-            return {"success": False, "error": "Movie not found"}
+            return {"success": False, "error": "Movie/TV series not found"}
         
         imdb_id = omdb.get("imdbID")
         
@@ -93,38 +102,65 @@ async def get_movie(title: str, year: Optional[int] = None):
             if not moviebox_item:
                 moviebox_item = results.items[0]
         
-        # 3. Get FULL moviebox details (this contains stars/cast!)
+        # 3. Determine content type
+        content_type = "movie" if moviebox_item and is_movie(moviebox_item) else "tv_series"
+        
+        # 4. Get FULL details (contains stars/cast)
         full_details = None
         if moviebox_item:
-            from moviebox_api.v2 import MovieDetails
-            details_obj = MovieDetails(session)
+            from moviebox_api.v2 import MovieDetails, TVSeriesDetails
+            
+            if content_type == "movie":
+                details_obj = MovieDetails(session)
+            else:
+                details_obj = TVSeriesDetails(session)
             full_details = await details_obj.get_content(moviebox_item.detailPath)
         
-        # 4. Get vidsrc streams
+        # 5. Get vidsrc streams
         streams = await get_vidsrc_streams(imdb_id) if imdb_id else []
         
-        # 5. Get moviebox downloads
+        # 6. Get downloads (different for movies vs TV series)
         downloads = []
         if moviebox_item:
             try:
-                downloads_obj = DownloadableSingleFilesDetail(session, moviebox_item)
-                download_data = await downloads_obj.get_content()
-                if download_data and 'downloads' in download_data:
-                    for dl in download_data['downloads']:
-                        size_val = dl.get('size', '0')
-                        try:
-                            size_mb = round(int(size_val) / 1024 / 1024, 2)
-                        except:
-                            size_mb = 0
-                        downloads.append({
-                            "quality": f"{dl.get('resolution')}p",
-                            "size_mb": size_mb,
-                            "url": dl.get('url')
-                        })
-            except:
-                pass
+                if content_type == "movie":
+                    # Movies: use DownloadableSingleFilesDetail
+                    downloads_obj = DownloadableSingleFilesDetail(session, moviebox_item)
+                    download_data = await downloads_obj.get_content()
+                    if download_data and 'downloads' in download_data:
+                        for dl in download_data['downloads']:
+                            size_val = dl.get('size', '0')
+                            try:
+                                size_mb = round(int(size_val) / 1024 / 1024, 2)
+                            except:
+                                size_mb = 0
+                            downloads.append({
+                                "quality": f"{dl.get('resolution')}p",
+                                "size_mb": size_mb,
+                                "url": dl.get('url')
+                            })
+                else:
+                    # TV Series: need to show available seasons/episodes info
+                    # Note: Actual download requires season/episode parameters
+                    # We'll show what's available instead
+                    if full_details and 'resource' in full_details:
+                        seasons_data = full_details.get('resource', {}).get('seasons', [])
+                        downloads = {
+                            "note": "TV series episodes require specific season/episode parameters",
+                            "available_seasons": [
+                                {
+                                    "season": s.get('se'),
+                                    "episodes": s.get('maxEp'),
+                                    "resolutions": [r.get('resolution') for r in s.get('resolutions', [])]
+                                }
+                                for s in seasons_data
+                            ],
+                            "example": "/api/download/tt0903747?season=1&episode=1"
+                        }
+            except Exception as e:
+                print(f"Downloads error: {e}")
         
-        # 6. Poster with dimensions
+        # 7. Poster with dimensions
         poster = None
         if moviebox_item and moviebox_item.cover:
             poster = {
@@ -136,7 +172,7 @@ async def get_movie(title: str, year: Optional[int] = None):
         elif omdb.get("Poster") and omdb.get("Poster") != "N/A":
             poster = {"url": omdb.get("Poster"), "width": None, "height": None, "size_kb": None}
         
-        # 7. Backdrop/stills
+        # 8. Backdrop/stills
         backdrop = None
         if moviebox_item and hasattr(moviebox_item, 'stills') and moviebox_item.stills:
             backdrop = {
@@ -146,7 +182,7 @@ async def get_movie(title: str, year: Optional[int] = None):
                 "size_kb": round(moviebox_item.stills.size / 1024, 2) if moviebox_item.stills.size else 0
             }
         
-        # 8. Trailer
+        # 9. Trailer
         trailer = None
         if full_details and 'subject' in full_details:
             trailer_data = full_details.get('subject', {}).get('trailer', {})
@@ -157,14 +193,13 @@ async def get_movie(title: str, year: Optional[int] = None):
                     "thumbnail": trailer_data.get('cover', {}).get('url') if trailer_data.get('cover') else None
                 }
         
-        # 9. Subtitles
+        # 10. Subtitles
         subtitles = []
         if moviebox_item and hasattr(moviebox_item, 'subtitles') and moviebox_item.subtitles:
             subs = moviebox_item.subtitles.split(',') if isinstance(moviebox_item.subtitles, str) else moviebox_item.subtitles
             for sub in subs[:20]:
                 if sub.strip():
                     lang = sub.strip()
-                    # Simple language code mapping
                     code_map = {
                         "English": "en", "Arabic": "ar", "French": "fr", "Spanish": "es",
                         "Indonesian": "id", "Malay": "ms", "Portuguese": "pt", "Russian": "ru",
@@ -173,11 +208,10 @@ async def get_movie(title: str, year: Optional[int] = None):
                         "Italian": "it", "Japanese": "ja", "Korean": "ko", "Turkish": "tr",
                         "Hindi": "hi", "Tamil": "ta", "Telugu": "te"
                     }
-                    # Try to match full language name
                     code = code_map.get(lang, lang[:2].lower())
                     subtitles.append({"language": lang, "code": code})
         
-        # 10. Cast from stars array (THIS IS THE FIX!)
+        # 11. Cast from stars array
         cast = []
         if full_details and 'stars' in full_details:
             for star in full_details.get('stars', [])[:15]:
@@ -187,7 +221,7 @@ async def get_movie(title: str, year: Optional[int] = None):
                     "avatar": star.get('avatarUrl')
                 })
         
-        # Fallback to OMDb if no cast from moviebox
+        # Fallback to OMDb if no cast
         if not cast and omdb.get("Actors"):
             actor_names = omdb.get("Actors", "").split(", ")
             for actor in actor_names[:10]:
@@ -197,7 +231,7 @@ async def get_movie(title: str, year: Optional[int] = None):
                     "avatar": None
                 })
         
-        # 11. Ratings
+        # 12. Ratings
         ratings = {
             "imdb": float(omdb.get("imdbRating", 0)) if omdb.get("imdbRating") != "N/A" else None,
             "imdb_votes": omdb.get("imdbVotes", "N/A"),
@@ -210,7 +244,7 @@ async def get_movie(title: str, year: Optional[int] = None):
             elif rating.get("Source") == "Metacritic":
                 ratings["metacritic"] = rating.get("Value")
         
-        # 12. Build response
+        # 13. Build response
         return {
             "success": True,
             "api": "Megan Movie API",
@@ -234,7 +268,8 @@ async def get_movie(title: str, year: Optional[int] = None):
                     "backdrop": backdrop,
                     "trailer": trailer,
                     "ratings": ratings,
-                    "subtitles": subtitles
+                    "subtitles": subtitles,
+                    "type": content_type
                 },
                 "sources": {
                     "downloads": downloads,
@@ -243,6 +278,48 @@ async def get_movie(title: str, year: Optional[int] = None):
             }
         }
         
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+@app.get("/api/download/{imdb_id}")
+async def download_episode(imdb_id: str, season: int = 1, episode: int = 1):
+    """Download a specific TV episode (requires season and episode)"""
+    try:
+        # Search for the series
+        search_obj = Search(session, query=imdb_id)
+        results = await search_obj.get_content_model()
+        
+        if not results.items:
+            return {"success": False, "error": "Series not found"}
+        
+        series_item = results.items[0]
+        
+        # Check if it's a TV series
+        if not is_tv_series(series_item):
+            return {"success": False, "error": "Not a TV series"}
+        
+        # Download specific episode
+        downloads_obj = DownloadableTVSeriesFilesDetail(session, series_item)
+        download_data = await downloads_obj.get_content(season=season, episode=episode)
+        
+        if download_data and 'downloads' in download_data:
+            return {
+                "success": True,
+                "type": "tv_series",
+                "season": season,
+                "episode": episode,
+                "downloads": [
+                    {
+                        "quality": f"{dl.get('resolution')}p",
+                        "size_mb": round(int(dl.get('size', 0)) / 1024 / 1024, 2),
+                        "url": dl.get('url')
+                    }
+                    for dl in download_data['downloads']
+                ]
+            }
+        else:
+            return {"success": False, "error": "Episode not available"}
+            
     except Exception as e:
         return {"success": False, "error": str(e)}
 
