@@ -15,6 +15,7 @@ if not hasattr(enum, 'StrEnum'):
 
 # Import routers
 from search.router import router as search_router
+from movies.router import router as movies_router
 
 app = FastAPI(title="Megan Movie API", version="2.0.0")
 
@@ -28,6 +29,7 @@ app.add_middleware(
 
 # Include routers
 app.include_router(search_router)
+app.include_router(movies_router)
 
 @app.get("/")
 async def root():
@@ -36,10 +38,9 @@ async def root():
         "version": "2.0.0",
         "endpoints": {
             "search": "/api/search?q=movie_name&type=all",
-            "search_quick": "/api/search/quick?q=movie_name",
-            "search_types": "/api/search/types",
-            "movie": "/api/movie/{title}",
-            "download": "/api/download/{identifier}"
+            "movie": "/api/movies/{title}?year=2010",
+            "movie_downloads": "/api/movies/{title}/downloads",
+            "movie_types": "/api/search/types"
         }
     }
 
