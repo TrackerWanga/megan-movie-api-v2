@@ -107,3 +107,8 @@ app.include_router(music_router)
 from anime.router import router as anime_router
 
 app.include_router(anime_router)
+
+# Import education router
+from education.router import router as education_router
+
+app.include_router(education_router)
