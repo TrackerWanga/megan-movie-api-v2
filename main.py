@@ -71,7 +71,7 @@ async def get_vidsrc_streams(imdb_id: str):
 
 @app.get("/api/movie/{title}")
 async def get_movie(title: str, year: Optional[int] = None):
-    """Get COMPLETE movie data with ALL metadata including actor avatars"""
+    """Get COMPLETE movie data with ALL metadata"""
     try:
         # 1. Get OMDb data
         omdb = await get_omdb_data(title=title, year=year)
@@ -93,10 +93,17 @@ async def get_movie(title: str, year: Optional[int] = None):
             if not moviebox_item:
                 moviebox_item = results.items[0]
         
-        # 3. Get vidsrc streams
+        # 3. Get FULL moviebox details (this contains stars/cast!)
+        full_details = None
+        if moviebox_item:
+            from moviebox_api.v2 import MovieDetails
+            details_obj = MovieDetails(session)
+            full_details = await details_obj.get_content(moviebox_item.detailPath)
+        
+        # 4. Get vidsrc streams
         streams = await get_vidsrc_streams(imdb_id) if imdb_id else []
         
-        # 4. Get moviebox downloads
+        # 5. Get moviebox downloads
         downloads = []
         if moviebox_item:
             try:
@@ -117,7 +124,7 @@ async def get_movie(title: str, year: Optional[int] = None):
             except:
                 pass
         
-        # 5. Poster with dimensions
+        # 6. Poster with dimensions
         poster = None
         if moviebox_item and moviebox_item.cover:
             poster = {
@@ -129,7 +136,7 @@ async def get_movie(title: str, year: Optional[int] = None):
         elif omdb.get("Poster") and omdb.get("Poster") != "N/A":
             poster = {"url": omdb.get("Poster"), "width": None, "height": None, "size_kb": None}
         
-        # 6. Backdrop/stills
+        # 7. Backdrop/stills
         backdrop = None
         if moviebox_item and hasattr(moviebox_item, 'stills') and moviebox_item.stills:
             backdrop = {
@@ -139,23 +146,25 @@ async def get_movie(title: str, year: Optional[int] = None):
                 "size_kb": round(moviebox_item.stills.size / 1024, 2) if moviebox_item.stills.size else 0
             }
         
-        # 7. Trailer
+        # 8. Trailer
         trailer = None
-        if moviebox_item and hasattr(moviebox_item, 'trailer') and moviebox_item.trailer:
-            if hasattr(moviebox_item.trailer, 'videoAddress') and moviebox_item.trailer.videoAddress:
+        if full_details and 'subject' in full_details:
+            trailer_data = full_details.get('subject', {}).get('trailer', {})
+            if trailer_data and 'videoAddress' in trailer_data:
                 trailer = {
-                    "url": moviebox_item.trailer.videoAddress.url,
-                    "duration": moviebox_item.trailer.videoAddress.duration,
-                    "thumbnail": str(moviebox_item.trailer.cover.url) if moviebox_item.trailer.cover else None
+                    "url": trailer_data['videoAddress'].get('url'),
+                    "duration": trailer_data['videoAddress'].get('duration'),
+                    "thumbnail": trailer_data.get('cover', {}).get('url') if trailer_data.get('cover') else None
                 }
         
-        # 8. Subtitles
+        # 9. Subtitles
         subtitles = []
         if moviebox_item and hasattr(moviebox_item, 'subtitles') and moviebox_item.subtitles:
             subs = moviebox_item.subtitles.split(',') if isinstance(moviebox_item.subtitles, str) else moviebox_item.subtitles
             for sub in subs[:20]:
                 if sub.strip():
                     lang = sub.strip()
+                    # Simple language code mapping
                     code_map = {
                         "English": "en", "Arabic": "ar", "French": "fr", "Spanish": "es",
                         "Indonesian": "id", "Malay": "ms", "Portuguese": "pt", "Russian": "ru",
@@ -164,21 +173,21 @@ async def get_movie(title: str, year: Optional[int] = None):
                         "Italian": "it", "Japanese": "ja", "Korean": "ko", "Turkish": "tr",
                         "Hindi": "hi", "Tamil": "ta", "Telugu": "te"
                     }
-                    code = code_map.get(lang, lang.lower()[:2])
+                    # Try to match full language name
+                    code = code_map.get(lang, lang[:2].lower())
                     subtitles.append({"language": lang, "code": code})
         
-        # 9. Cast with avatars (ACTOR POSTERS!)
+        # 10. Cast from stars array (THIS IS THE FIX!)
         cast = []
-        if moviebox_item and hasattr(moviebox_item, 'stafflist') and moviebox_item.stafflist:
-            for staff in moviebox_item.stafflist[:15]:
-                if hasattr(staff, 'name') and hasattr(staff, 'character'):
-                    cast.append({
-                        "name": staff.name,
-                        "character": staff.character,
-                        "avatar": str(staff.avatarUrl) if hasattr(staff, 'avatarUrl') and staff.avatarUrl else None
-                    })
+        if full_details and 'stars' in full_details:
+            for star in full_details.get('stars', [])[:15]:
+                cast.append({
+                    "name": star.get('name'),
+                    "character": star.get('character'),
+                    "avatar": star.get('avatarUrl')
+                })
         
-        # If no avatars from moviebox, try to get from OMDb
+        # Fallback to OMDb if no cast from moviebox
         if not cast and omdb.get("Actors"):
             actor_names = omdb.get("Actors", "").split(", ")
             for actor in actor_names[:10]:
@@ -188,7 +197,7 @@ async def get_movie(title: str, year: Optional[int] = None):
                     "avatar": None
                 })
         
-        # 10. Ratings
+        # 11. Ratings
         ratings = {
             "imdb": float(omdb.get("imdbRating", 0)) if omdb.get("imdbRating") != "N/A" else None,
             "imdb_votes": omdb.get("imdbVotes", "N/A"),
@@ -201,7 +210,7 @@ async def get_movie(title: str, year: Optional[int] = None):
             elif rating.get("Source") == "Metacritic":
                 ratings["metacritic"] = rating.get("Value")
         
-        # 11. Build response
+        # 12. Build response
         return {
             "success": True,
             "api": "Megan Movie API",
