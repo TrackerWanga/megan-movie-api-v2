@@ -97,3 +97,8 @@ async def root():
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
+# Import music router
+from music.router import router as music_router
+
+app.include_router(music_router)
