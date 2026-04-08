@@ -46,19 +46,40 @@ app.include_router(music_router)
 app.include_router(anime_router)
 app.include_router(education_router)
 
-# Serve static files (HTML documentation and landing page)
+# Serve static files
 static_dir = os.path.join(os.path.dirname(__file__), "static")
 if os.path.exists(static_dir):
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
+# ============================================
+# HTML PAGES
+# ============================================
+
 @app.get("/", response_class=HTMLResponse)
 async def landing_page():
-    """Serve the beautiful landing page"""
+    """Beautiful landing page"""
     landing_path = os.path.join(os.path.dirname(__file__), "static", "landing.html")
     if os.path.exists(landing_path):
         with open(landing_path, 'r', encoding='utf-8') as f:
             return HTMLResponse(content=f.read())
-    return HTMLResponse(content="<h1>Megan Movie API</h1><p>Welcome to Megan Movie API</p>")
+    return HTMLResponse(content="<h1>Megan Movie API</h1><p>Welcome</p>")
+
+@app.get("/docs")
+async def docs_redirect():
+    """Redirect to API documentation"""
+    return RedirectResponse(url="/static/index.html")
+
+@app.get("/about")
+async def about_page():
+    """About page - creator info"""
+    about_path = os.path.join(os.path.dirname(__file__), "static", "about.html")
+    if os.path.exists(about_path):
+        return FileResponse(about_path)
+    return RedirectResponse(url="/")
+
+# ============================================
+# API ENDPOINTS
+# ============================================
 
 @app.get("/api/health")
 async def health_check():
@@ -70,23 +91,20 @@ async def health_check():
         "version": "2.0.0"
     }
 
-@app.get("/api/docs")
-async def api_docs_redirect():
-    """Redirect to the API documentation page"""
-    return RedirectResponse(url="/static/docs.html")
-
-@app.get("/docs")
-async def docs_redirect():
-    """Redirect to API documentation"""
-    return RedirectResponse(url="/static/docs.html")
-
-@app.get("/about")
-async def about_page():
-    """About page - creator info and project details"""
-    about_path = os.path.join(os.path.dirname(__file__), "static", "about.html")
-    if os.path.exists(about_path):
-        return FileResponse(about_path)
-    return RedirectResponse(url="/")
+@app.get("/api/info")
+async def api_info():
+    """Get API information"""
+    return {
+        "name": "Megan Movie API",
+        "version": "2.0.0",
+        "creator": "Tracker Wanga",
+        "description": "Complete movie, TV series, anime, music, and educational content API",
+        "total_endpoints": 63,
+        "categories": ["Movies", "TV Series", "Anime", "Music", "Education", "Sports", "Kids", "Homepage"],
+        "documentation": "/static/index.html",
+        "about": "/about",
+        "health": "/api/health"
+    }
 
 if __name__ == "__main__":
     import uvicorn
