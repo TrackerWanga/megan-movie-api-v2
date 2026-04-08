@@ -3,454 +3,102 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>About | Tracker Wanga - Creator of Megan Movie API</title>
-    <meta name="description" content="Tracker Wanga - 20-year-old developer from Kenya, creator of Megan Movie API and 10+ stable projects">
-    <meta property="og:title" content="Tracker Wanga | Developer & Creator">
-    <meta property="og:description" content="Movie API, web apps, and developer tools">
-    <meta property="og:image" content="https://files.catbox.moe/dhn3ja.png">
-    <meta property="og:type" content="website">
-    <meta name="twitter:card" content="summary_large_image">
-    <link rel="icon" type="image/png" href="https://files.catbox.moe/dhn3ja.png">
+    <title>About | Megan Movie API</title>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
+        * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
-            background: linear-gradient(135deg, #0a0a0a 0%, #0f0f1a 50%, #1a1a2e 100%);
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #0a0a0a 0%, #1a1a2e 100%);
             color: #f0f0f0;
             min-height: 100vh;
         }
-
-        /* Navigation */
         .navbar {
             position: fixed;
             top: 0;
             width: 100%;
             padding: 20px 40px;
-            background: rgba(10, 10, 10, 0.95);
+            background: rgba(10,10,10,0.95);
             backdrop-filter: blur(10px);
             z-index: 1000;
             display: flex;
             justify-content: space-between;
             align-items: center;
             flex-wrap: wrap;
-            gap: 15px;
             border-bottom: 1px solid rgba(255,255,255,0.1);
         }
-
-        .logo {
-            font-size: 1.5rem;
-            font-weight: bold;
-            background: linear-gradient(135deg, #e50914, #ff6b6b);
-            -webkit-background-clip: text;
-            background-clip: text;
-            color: transparent;
-        }
-
-        .nav-links {
-            display: flex;
-            gap: 25px;
-            flex-wrap: wrap;
-        }
-
-        .nav-links a {
-            color: #ddd;
-            text-decoration: none;
-            transition: color 0.3s;
-        }
-
-        .nav-links a:hover, .nav-links a.active {
-            color: #e50914;
-        }
-
-        /* Main Content */
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 100px 30px 60px;
-        }
-
-        /* Hero Section */
-        .hero {
-            display: flex;
-            align-items: center;
-            gap: 50px;
-            flex-wrap: wrap;
-            margin-bottom: 60px;
-        }
-
-        .hero-image {
-            flex: 1;
-            min-width: 250px;
-            text-align: center;
-        }
-
-        .hero-image img {
-            width: 250px;
-            height: 250px;
-            border-radius: 50%;
-            object-fit: cover;
-            border: 4px solid #e50914;
-            box-shadow: 0 20px 40px rgba(0,0,0,0.3);
-        }
-
-        .hero-text {
-            flex: 2;
-            min-width: 280px;
-        }
-
-        .hero-text h1 {
-            font-size: 2.5rem;
-            margin-bottom: 10px;
-        }
-
-        .hero-text h1 span {
-            color: #e50914;
-        }
-
-        .hero-text .location {
-            display: inline-block;
-            background: rgba(255,255,255,0.1);
-            padding: 5px 15px;
-            border-radius: 20px;
-            font-size: 0.8rem;
-            margin: 15px 0;
-        }
-
-        .hero-text .bio {
-            font-size: 1.1rem;
-            line-height: 1.6;
-            opacity: 0.9;
-        }
-
-        /* Section Styles */
-        .section {
-            margin-bottom: 50px;
-            background: rgba(255,255,255,0.03);
-            border-radius: 20px;
-            padding: 30px;
-            border: 1px solid rgba(255,255,255,0.05);
-        }
-
-        .section-title {
-            font-size: 1.8rem;
-            margin-bottom: 25px;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-
-        .section-title span {
-            color: #e50914;
-        }
-
-        /* Project Grid */
-        .projects-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-            gap: 20px;
-        }
-
-        .project-card {
-            background: rgba(255,255,255,0.05);
-            border-radius: 15px;
-            padding: 20px;
-            transition: transform 0.3s;
-            border: 1px solid rgba(255,255,255,0.05);
-        }
-
-        .project-card:hover {
-            transform: translateY(-5px);
-            background: rgba(255,255,255,0.08);
-        }
-
-        .project-card h3 {
-            margin-bottom: 10px;
-            color: #e50914;
-        }
-
-        .project-card p {
-            opacity: 0.7;
-            font-size: 0.9rem;
-            margin-bottom: 15px;
-        }
-
-        .project-link {
-            color: #e50914;
-            text-decoration: none;
-            font-size: 0.85rem;
-        }
-
-        /* Skills */
-        .skills-list {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 12px;
-        }
-
-        .skill-tag {
-            background: rgba(229,9,20,0.15);
-            border: 1px solid rgba(229,9,20,0.3);
-            padding: 8px 18px;
-            border-radius: 30px;
-            font-size: 0.9rem;
-        }
-
-        /* Contact Links */
-        .contact-links {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 20px;
-            margin-top: 20px;
-        }
-
-        .contact-link {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            background: rgba(255,255,255,0.05);
-            padding: 12px 24px;
-            border-radius: 40px;
-            text-decoration: none;
-            color: white;
-            transition: all 0.3s;
-        }
-
-        .contact-link:hover {
-            background: #e50914;
-            transform: translateY(-2px);
-        }
-
-        /* Stats */
-        .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-            gap: 20px;
-            text-align: center;
-        }
-
-        .stat-item {
-            padding: 20px;
-            background: rgba(255,255,255,0.03);
-            border-radius: 15px;
-        }
-
-        .stat-number {
-            font-size: 2rem;
-            font-weight: bold;
-            color: #e50914;
-        }
-
-        /* API Features */
-        .features-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
-            gap: 15px;
-        }
-
-        .feature-item {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            padding: 12px;
-            background: rgba(255,255,255,0.03);
-            border-radius: 10px;
-        }
-
-        /* Footer */
-        .footer {
-            text-align: center;
-            padding: 40px;
-            border-top: 1px solid rgba(255,255,255,0.05);
-            margin-top: 40px;
-        }
-
+        .logo { font-size: 1.5rem; font-weight: bold; background: linear-gradient(135deg, #e50914, #ff6b6b); -webkit-background-clip: text; background-clip: text; color: transparent; }
+        .nav-links { display: flex; gap: 25px; flex-wrap: wrap; }
+        .nav-links a { color: #ddd; text-decoration: none; transition: color 0.3s; }
+        .nav-links a:hover, .nav-links a.active { color: #e50914; }
+        .container { max-width: 1200px; margin: 0 auto; padding: 100px 30px 60px; }
+        .hero { display: flex; align-items: center; gap: 50px; flex-wrap: wrap; margin-bottom: 60px; }
+        .hero-image { flex: 1; min-width: 250px; text-align: center; }
+        .hero-image img { width: 200px; height: 200px; border-radius: 50%; object-fit: cover; border: 4px solid #e50914; }
+        .hero-text { flex: 2; min-width: 280px; }
+        .hero-text h1 { font-size: 2.5rem; margin-bottom: 10px; }
+        .hero-text h1 span { color: #e50914; }
+        .hero-text .location { display: inline-block; background: rgba(255,255,255,0.1); padding: 5px 15px; border-radius: 20px; font-size: 0.8rem; margin: 15px 0; }
+        .section { background: rgba(255,255,255,0.03); border-radius: 20px; padding: 30px; margin-bottom: 30px; border: 1px solid rgba(255,255,255,0.05); }
+        .section-title { font-size: 1.8rem; margin-bottom: 20px; color: #e50914; }
+        .skills { display: flex; flex-wrap: wrap; gap: 10px; }
+        .skill { background: rgba(229,9,20,0.15); border: 1px solid rgba(229,9,20,0.3); padding: 8px 18px; border-radius: 30px; }
+        .contact-links { display: flex; flex-wrap: wrap; gap: 15px; margin-top: 20px; }
+        .contact-link { background: rgba(255,255,255,0.05); padding: 12px 24px; border-radius: 40px; text-decoration: none; color: white; transition: all 0.3s; }
+        .contact-link:hover { background: #e50914; transform: translateY(-2px); }
+        .footer { text-align: center; padding: 40px; border-top: 1px solid rgba(255,255,255,0.05); }
         @media (max-width: 768px) {
             .navbar { padding: 15px 20px; }
             .container { padding: 80px 20px 40px; }
             .hero-text h1 { font-size: 1.8rem; }
-            .section-title { font-size: 1.5rem; }
         }
     </style>
 </head>
 <body>
     <nav class="navbar">
-        <div class="logo">🎬 Tracker Wanga</div>
+        <div class="logo">🎬 Megan Movie API</div>
         <div class="nav-links">
             <a href="/docs/index.html">API Docs</a>
             <a href="/about" class="active">About</a>
             <a href="https://github.com/TrackerWanga" target="_blank">GitHub</a>
-            <a href="https://movies.megan.qzz.io" target="_blank">Movies Site</a>
         </div>
     </nav>
-
     <div class="container">
-        <!-- Hero Section -->
         <div class="hero">
             <div class="hero-image">
                 <img src="https://files.catbox.moe/dhn3ja.png" alt="Tracker Wanga">
             </div>
             <div class="hero-text">
-                <h1>Hi, I'm <span>Tracker Wanga</span></h1>
-                <div class="location">📍 Uasingishu, Kenya | 🇰🇪 Age 20</div>
-                <p class="bio">
-                    I'm a passionate developer from Kenya, building innovative web applications and APIs. 
-                    At just 20 years old, I've created over 10 stable projects including the Megan Movie API, 
-                    which serves thousands of movie, TV series, anime, music, and educational content requests.
-                </p>
+                <h1>Tracker <span>Wanga</span></h1>
+                <div class="location">📍 Uasingishu, Kenya | Age 20</div>
+                <p>Developer and creator of Megan Movie API. Building innovative web applications and APIs with 10+ stable projects.</p>
             </div>
         </div>
-
-        <!-- Stats -->
         <div class="section">
-            <h2 class="section-title">📊 <span>Quick Stats</span></h2>
-            <div class="stats-grid">
-                <div class="stat-item">
-                    <div class="stat-number">10+</div>
-                    <div>Stable Projects</div>
-                </div>
-                <div class="stat-item">
-                    <div class="stat-number">63+</div>
-                    <div>API Endpoints</div>
-                </div>
-                <div class="stat-item">
-                    <div class="stat-number">7</div>
-                    <div>Content Categories</div>
-                </div>
-                <div class="stat-item">
-                    <div class="stat-number">24/7</div>
-                    <div>Uptime</div>
-                </div>
+            <h2 class="section-title">🚀 Projects</h2>
+            <p><strong>Megan Movie API</strong> - Complete movie, TV series, anime, music, and educational content API with 63+ endpoints.</p>
+            <p style="margin-top: 10px;"><strong>Other Projects:</strong> MEGAN-MD, movizone, gifted-session, siputzx-api, and more on GitHub.</p>
+        </div>
+        <div class="section">
+            <h2 class="section-title">💻 Skills</h2>
+            <div class="skills">
+                <span class="skill">Python</span><span class="skill">FastAPI</span><span class="skill">TypeScript</span>
+                <span class="skill">Next.js</span><span class="skill">React</span><span class="skill">Node.js</span>
+                <span class="skill">MongoDB</span><span class="skill">PostgreSQL</span><span class="skill">REST APIs</span>
             </div>
         </div>
-
-        <!-- Featured Project -->
         <div class="section">
-            <h2 class="section-title">🎬 <span>Featured Project</span></h2>
-            <div style="display: flex; gap: 30px; flex-wrap: wrap; align-items: center;">
-                <div style="flex: 1;">
-                    <img src="https://files.catbox.moe/hp7jsd.png" alt="Megan Movie API" style="width: 100%; max-width: 400px; border-radius: 15px;">
-                </div>
-                <div style="flex: 2;">
-                    <h3 style="color: #e50914; margin-bottom: 15px;">Megan Movie API</h3>
-                    <p style="margin-bottom: 15px; line-height: 1.6;">
-                        A comprehensive REST API providing access to movies, TV series, anime, music videos, 
-                        and educational content. Features include direct MP4 downloads, HLS streaming, 
-                        multi-language subtitles, cast information, trailers, and more.
-                    </p>
-                    <p style="margin-bottom: 20px; opacity: 0.8;">
-                        <strong>63+ endpoints</strong> | <strong>No authentication required</strong> | 
-                        <strong>Free for all developers</strong>
-                    </p>
-                    <div style="display: flex; gap: 15px; flex-wrap: wrap;">
-                        <a href="/docs/index.html" class="contact-link" style="background: #e50914;">📖 View API Docs</a>
-                        <a href="https://github.com/TrackerWanga/megan-movie-api-v2" class="contact-link">🐙 GitHub Repo</a>
-                        <a href="https://movies.megan.qzz.io" class="contact-link">🎥 Demo Site</a>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Other Projects -->
-        <div class="section">
-            <h2 class="section-title">🚀 <span>Other Projects</span></h2>
-            <div class="projects-grid">
-                <div class="project-card">
-                    <h3>MEGAN-MD</h3>
-                    <p>WhatsApp bot with advanced features and automation capabilities.</p>
-                    <a href="https://github.com/TrackerWanga/MEGAN-MD" class="project-link">View on GitHub →</a>
-                </div>
-                <div class="project-card">
-                    <h3>gifted-session</h3>
-                    <p>Web session generator for WhatsApp socket connection using code or QR.</p>
-                    <a href="https://github.com/TrackerWanga/gifted-session" class="project-link">View on GitHub →</a>
-                </div>
-                <div class="project-card">
-                    <h3>siputzx-api</h3>
-                    <p>API wrapper for Siputxz API services.</p>
-                    <a href="https://github.com/TrackerWanga/siputzx-api" class="project-link">View on GitHub →</a>
-                </div>
-                <div class="project-card">
-                    <h3>movizone</h3>
-                    <p>Terminal UI for browsing, searching, and downloading movies with fuzzy search.</p>
-                    <a href="https://github.com/TrackerWanga/movizone" class="project-link">View on GitHub →</a>
-                </div>
-                <div class="project-card">
-                    <h3>wanga-movies</h3>
-                    <p>Movie streaming and download platform.</p>
-                    <a href="https://github.com/TrackerWanga/wanga-movies" class="project-link">View on GitHub →</a>
-                </div>
-                <div class="project-card">
-                    <h3>moviebox-api</h3>
-                    <p>Python wrapper for moviebox.ph - search and download movies/TV series.</p>
-                    <a href="https://github.com/TrackerWanga/moviebox-api" class="project-link">View on GitHub →</a>
-                </div>
-            </div>
-        </div>
-
-        <!-- Skills -->
-        <div class="section">
-            <h2 class="section-title">💻 <span>Skills & Technologies</span></h2>
-            <div class="skills-list">
-                <span class="skill-tag">Python</span>
-                <span class="skill-tag">FastAPI</span>
-                <span class="skill-tag">TypeScript</span>
-                <span class="skill-tag">Next.js</span>
-                <span class="skill-tag">React</span>
-                <span class="skill-tag">Node.js</span>
-                <span class="skill-tag">JavaScript</span>
-                <span class="skill-tag">HTML/CSS</span>
-                <span class="skill-tag">MongoDB</span>
-                <span class="skill-tag">PostgreSQL</span>
-                <span class="skill-tag">REST APIs</span>
-                <span class="skill-tag">Web Scraping</span>
-                <span class="skill-tag">Vercel</span>
-                <span class="skill-tag">Render</span>
-                <span class="skill-tag">Git/GitHub</span>
-            </div>
-        </div>
-
-        <!-- API Features -->
-        <div class="section">
-            <h2 class="section-title">⚡ <span>Megan API Features</span></h2>
-            <div class="features-grid">
-                <div class="feature-item">🎬 Movies (MP4 downloads)</div>
-                <div class="feature-item">📺 TV Series (episode downloads)</div>
-                <div class="feature-item">🎵 Music Videos</div>
-                <div class="feature-item">🎌 Anime (with seasons/episodes)</div>
-                <div class="feature-item">📚 Educational content</div>
-                <div class="feature-item">🏠 Homepage banners & categories</div>
-                <div class="feature-item">⚽ Sports content (WWE, Football, Boxing)</div>
-                <div class="feature-item">👶 Kids content (Nursery, Animation)</div>
-                <div class="feature-item">🎭 Cast info with avatars</div>
-                <div class="feature-item">📝 Multi-language subtitles</div>
-                <div class="feature-item">🎬 Trailer MP4 URLs</div>
-                <div class="feature-item">🖼️ Posters with dimensions</div>
-            </div>
-        </div>
-
-        <!-- Contact -->
-        <div class="section">
-            <h2 class="section-title">📱 <span>Connect With Me</span></h2>
+            <h2 class="section-title">📱 Connect</h2>
             <div class="contact-links">
-                <a href="https://wa.me/254758476795" class="contact-link">💬 WhatsApp: +254 758 476795</a>
-                <a href="https://t.me/megan_ceo" class="contact-link">📱 Telegram: @megan_ceo</a>
-                <a href="https://youtube.com/@wanga_tech" class="contact-link">🎥 YouTube: @wanga_tech</a>
-                <a href="https://github.com/TrackerWanga" class="contact-link">🐙 GitHub: TrackerWanga</a>
+                <a href="https://wa.me/254758476795" class="contact-link">💬 WhatsApp</a>
+                <a href="https://t.me/megan_ceo" class="contact-link">📱 Telegram</a>
+                <a href="https://youtube.com/@wanga_tech" class="contact-link">🎥 YouTube</a>
+                <a href="https://github.com/TrackerWanga" class="contact-link">🐙 GitHub</a>
             </div>
         </div>
-
-        <!-- Footer -->
-        <div class="footer">
-            <p>© 2025 Tracker Wanga | Built with ❤️ from Uasingishu, Kenya</p>
-            <p style="font-size: 0.7rem; opacity: 0.5; margin-top: 10px;">
-                Megan Movie API v2.0 | 63+ Endpoints | Free for all developers
-            </p>
-        </div>
+    </div>
+    <div class="footer">
+        <p>© 2025 Tracker Wanga | Built with ❤️ from Kenya</p>
+        <p style="font-size: 0.7rem; opacity: 0.5;">Megan Movie API v2.0 | 63+ Endpoints | Free for developers</p>
     </div>
 </body>
 </html>
