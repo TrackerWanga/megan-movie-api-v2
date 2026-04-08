@@ -4,7 +4,7 @@ import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import RedirectResponse, FileResponse
+from fastapi.responses import RedirectResponse, FileResponse, HTMLResponse
 from datetime import datetime
 
 if not hasattr(enum, 'StrEnum'):
@@ -26,7 +26,7 @@ from music.router import router as music_router
 from anime.router import router as anime_router
 from education.router import router as education_router
 
-app = FastAPI(title="Megan Movie API", version="2.0.0")
+app = FastAPI(title="Megan Movie API", version="2.0.0", docs_url=None, redoc_url=None)
 
 # CORS middleware
 app.add_middleware(
@@ -46,64 +46,19 @@ app.include_router(music_router)
 app.include_router(anime_router)
 app.include_router(education_router)
 
-# Serve static files (HTML documentation)
+# Serve static files (HTML documentation and landing page)
 static_dir = os.path.join(os.path.dirname(__file__), "static")
 if os.path.exists(static_dir):
-    app.mount("/docs", StaticFiles(directory=static_dir, html=True), name="static")
+    app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
-@app.get("/")
-async def root():
-    return {
-        "api": "Megan Movie API",
-        "version": "2.0.0",
-        "creator": "Megan / Wanga",
-        "description": "Complete movie, TV series, anime, music, and educational content API",
-        "documentation": "/docs/index.html",
-        "about": "/about",
-        "health": "/api/health",
-        "total_endpoints": 63,
-        "endpoints": {
-            "search": "/api/search?q=movie_name&type=all",
-            "search_quick": "/api/search/quick?q=movie_name",
-            "search_types": "/api/search/types",
-            "movie": "/api/movies/{title}?year=2010",
-            "movie_downloads": "/api/movies/{title}/downloads",
-            "tv_search": "/api/tv/search?q=breaking",
-            "tv_series": "/api/tv/{title}",
-            "tv_episode": "/api/tv/{title}/episode?season=1&episode=1",
-            "tv_seasons": "/api/tv/{title}/seasons",
-            "music_search": "/api/music/search?q=pharrell",
-            "music_artist": "/api/music/artist/{name}",
-            "music_trending": "/api/music/trending",
-            "music_popular": "/api/music/popular",
-            "music_latest": "/api/music/latest",
-            "anime_search": "/api/anime/search?q=naruto",
-            "anime_popular": "/api/anime/popular",
-            "anime_trending": "/api/anime/trending",
-            "anime_latest": "/api/anime/latest",
-            "education_search": "/api/education/search?q=python",
-            "education_documentaries": "/api/education/documentaries",
-            "education_tutorials": "/api/education/tutorials",
-            "main_banners": "/api/homepage/banners",
-            "trending": "/api/homepage/trending",
-            "action": "/api/homepage/action",
-            "horror": "/api/homepage/horror",
-            "romance": "/api/homepage/romance",
-            "adventure": "/api/homepage/adventure",
-            "kdrama": "/api/homepage/kdrama",
-            "cdrama": "/api/homepage/cdrama",
-            "turkish": "/api/homepage/turkish",
-            "sadrama": "/api/homepage/sadrama",
-            "blackshows": "/api/homepage/blackshows",
-            "wwe": "/api/sports/wwe",
-            "football": "/api/sports/football",
-            "boxing": "/api/sports/boxing",
-            "live_sports": "/api/sports/live",
-            "nursery_rhymes": "/api/kids/nursery",
-            "animation": "/api/kids/animation",
-            "platforms": "/api/platforms"
-        }
-    }
+@app.get("/", response_class=HTMLResponse)
+async def landing_page():
+    """Serve the beautiful landing page"""
+    landing_path = os.path.join(os.path.dirname(__file__), "static", "landing.html")
+    if os.path.exists(landing_path):
+        with open(landing_path, 'r', encoding='utf-8') as f:
+            return HTMLResponse(content=f.read())
+    return HTMLResponse(content="<h1>Megan Movie API</h1><p>Welcome to Megan Movie API</p>")
 
 @app.get("/api/health")
 async def health_check():
@@ -117,8 +72,13 @@ async def health_check():
 
 @app.get("/api/docs")
 async def api_docs_redirect():
-    """Redirect to the beautiful API documentation page"""
-    return RedirectResponse(url="/docs/index.html")
+    """Redirect to the API documentation page"""
+    return RedirectResponse(url="/static/docs.html")
+
+@app.get("/docs")
+async def docs_redirect():
+    """Redirect to API documentation"""
+    return RedirectResponse(url="/static/docs.html")
 
 @app.get("/about")
 async def about_page():
@@ -126,7 +86,7 @@ async def about_page():
     about_path = os.path.join(os.path.dirname(__file__), "static", "about.html")
     if os.path.exists(about_path):
         return FileResponse(about_path)
-    return RedirectResponse(url="/docs/index.html")
+    return RedirectResponse(url="/")
 
 if __name__ == "__main__":
     import uvicorn
