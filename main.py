@@ -151,3 +151,11 @@ async def api_docs_redirect():
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
+@app.get("/about")
+async def about_page():
+    from fastapi.responses import FileResponse
+    about_path = os.path.join(os.path.dirname(__file__), "static", "about.html")
+    if os.path.exists(about_path):
+        return FileResponse(about_path)
+    return RedirectResponse(url="/docs/index.html")
