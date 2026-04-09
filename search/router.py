@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Query
-from typing import Optional, List, Dict, Any
+from typing import Optional
 import httpx
-import asyncio
+import re
 from datetime import datetime
 
 from moviebox_api.v2 import Search, Session
@@ -19,7 +19,6 @@ TYPE_MAP = {
     7: "anime"
 }
 
-# Type filters
 TYPE_FILTERS = {
     "all": None,
     "movie": 1,
@@ -32,15 +31,10 @@ TYPE_FILTERS = {
 # OMDb configuration
 OMDB_API_KEY = "9b5d7e52"
 OMDB_URL = "http://www.omdbapi.com/"
-
-# Simple cache for OMDb results (to avoid repeated calls)
 omdb_cache = {}
 
 async def get_imdb_id_from_omdb(title: str, year: int = None) -> Optional[str]:
-    """Get IMDb ID from OMDb API with caching"""
     cache_key = f"{title}_{year}" if year else title
-    
-    # Check cache first
     if cache_key in omdb_cache:
         return omdb_cache[cache_key]
     
@@ -52,7 +46,6 @@ async def get_imdb_id_from_omdb(title: str, year: int = None) -> Optional[str]:
         async with httpx.AsyncClient(timeout=5.0) as client:
             response = await client.get(OMDB_URL, params=params)
             data = response.json()
-            
             if data.get("Response") == "True":
                 imdb_id = data.get("imdbID")
                 omdb_cache[cache_key] = imdb_id
@@ -64,8 +57,6 @@ async def get_imdb_id_from_omdb(title: str, year: int = None) -> Optional[str]:
     return None
 
 def extract_imdb_from_item(item) -> Optional[str]:
-    """Try to extract IMDb ID from moviebox item if available"""
-    # Check if item has ops field with imdb_id
     if hasattr(item, 'ops') and item.ops:
         try:
             import json
@@ -75,14 +66,10 @@ def extract_imdb_from_item(item) -> Optional[str]:
         except:
             pass
     
-    # Check if item has imdbId attribute
     if hasattr(item, 'imdbId') and item.imdbId:
         return item.imdbId
     
-    # Check if detailPath contains imdb pattern (rare)
     if hasattr(item, 'detailPath') and item.detailPath:
-        # Some detailPaths have imdb pattern like "tt1234567"
-        import re
         match = re.search(r'tt\d{7}', item.detailPath)
         if match:
             return match.group(0)
@@ -90,7 +77,6 @@ def extract_imdb_from_item(item) -> Optional[str]:
     return None
 
 def generate_megan_id(imdb_id: str = None, subject_id: str = None) -> str:
-    """Generate Megan ID from IMDb ID or subjectId"""
     if imdb_id:
         return f"megan-{imdb_id}"
     elif subject_id:
@@ -99,89 +85,64 @@ def generate_megan_id(imdb_id: str = None, subject_id: str = None) -> str:
 
 @router.get("")
 async def search_all(
-    q: str = Query(..., min_length=1, description="Search query"),
-    type: str = Query("all", description="Filter by type: all, movie, tv, anime, music, education"),
-    limit: int = Query(20, ge=1, le=50, description="Results limit"),
-    include_imdb: bool = Query(True, description="Include IMDb IDs (slower but more complete)")
+    q: str = Query(..., min_length=1),
+    type: str = Query("all"),
+    limit: int = Query(20, ge=1, le=50),
+    include_imdb: bool = Query(True)
 ):
-    """Search across all content types with Megan IDs and optional IMDb lookup"""
-    
     session = Session()
-    
-    # Determine subject type filter
     subject_type = TYPE_FILTERS.get(type)
     
-    if subject_type:
-        search = Search(session, query=q, subject_type=subject_type)
-    else:
-        search = Search(session, query=q, subject_type=SubjectType.MOVIES)
-    
     try:
+        if subject_type:
+            search = Search(session, query=q, subject_type=subject_type)
+        else:
+            search = Search(session, query=q, subject_type=SubjectType.MOVIES)
+        
         results = await search.get_content_model()
     except Exception as e:
-        return {
-            "success": False,
-            "error": str(e),
-            "query": q
-        }
+        return {"success": False, "error": str(e), "query": q}
     
-    # Process results
     items = []
     for item in results.items[:limit]:
-        # Basic info
         item_type = TYPE_MAP.get(item.subjectType, "unknown")
         year = item.releaseDate.year if item.releaseDate else None
         
-        # Try to get IMDb ID (fast path first)
         imdb_id = extract_imdb_from_item(item)
-        
-        # If not found and include_imdb is True, try OMDb
         if not imdb_id and include_imdb and year:
             imdb_id = await get_imdb_id_from_omdb(item.title, year)
         
-        # Generate Megan ID
         megan_id = generate_megan_id(imdb_id, str(item.subjectId) if item.subjectId else None)
         
         items.append({
-            "megan_id": megan_id,
-            "imdb_id": imdb_id,
             "title": item.title,
             "year": year,
             "type": item_type,
-            "type_id": item.subjectType,
             "rating": item.imdbRatingValue,
-            "genres": item.genre if isinstance(item.genre, list) else (item.genre.split(',') if item.genre else []),
             "poster": item.cover.url if item.cover else None,
-            "detailPath": item.detailPath,
             "subjectId": str(item.subjectId) if item.subjectId else None,
-            "has_download": item.hasResource if hasattr(item, 'hasResource') else False
+            "detailPath": item.detailPath,
+            "megan_id": megan_id,
+            "imdb_id": imdb_id
         })
     
     return {
         "success": True,
         "query": q,
-        "type_filter": type,
         "total": len(items),
         "results": items
     }
 
 @router.get("/quick")
-async def search_quick(
-    q: str = Query(..., min_length=1, description="Search query"),
-    type: str = Query("all", description="Filter by type"),
-    limit: int = Query(20, ge=1, le=50)
-):
-    """Quick search - no IMDb lookup, just moviebox data"""
-    
+async def search_quick(q: str = Query(..., min_length=1), type: str = Query("all"), limit: int = Query(20, ge=1, le=50)):
     session = Session()
     subject_type = TYPE_FILTERS.get(type)
     
-    if subject_type:
-        search = Search(session, query=q, subject_type=subject_type)
-    else:
-        search = Search(session, query=q, subject_type=SubjectType.MOVIES)
-    
     try:
+        if subject_type:
+            search = Search(session, query=q, subject_type=subject_type)
+        else:
+            search = Search(session, query=q, subject_type=SubjectType.MOVIES)
         results = await search.get_content_model()
     except Exception as e:
         return {"success": False, "error": str(e), "query": q}
@@ -190,7 +151,6 @@ async def search_quick(
     for item in results.items[:limit]:
         year = item.releaseDate.year if item.releaseDate else None
         item_type = TYPE_MAP.get(item.subjectType, "unknown")
-        
         items.append({
             "title": item.title,
             "year": year,
@@ -201,17 +161,10 @@ async def search_quick(
             "subjectId": str(item.subjectId) if item.subjectId else None
         })
     
-    return {
-        "success": True,
-        "query": q,
-        "type_filter": type,
-        "total": len(items),
-        "results": items
-    }
+    return {"success": True, "query": q, "total": len(items), "results": items}
 
 @router.get("/types")
 async def get_available_types():
-    """Get list of available content types"""
     return {
         "success": True,
         "types": [
