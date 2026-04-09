@@ -253,3 +253,61 @@ async def health_check():
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
+# ============================================
+# PROXY ENDPOINTS (Hide PRINCE CDN)
+# ============================================
+
+from urllib.parse import unquote
+
+@app.get("/api/proxy/dl")
+async def proxy_download(url: str, title: str = "video", quality: str = "1080p"):
+    """Proxy download through Megan API - hides real source"""
+    # Decode the URL
+    decoded_url = unquote(url)
+    
+    async with httpx.AsyncClient(timeout=120.0, follow_redirects=True) as client:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Accept": "*/*",
+            "Referer": "https://movieapi.megan.qzz.io/",
+        }
+        
+        response = await client.get(decoded_url, headers=headers)
+        
+        filename = f"{title.replace(' ', '_')}_{quality}.mp4"
+        
+        return StreamingResponse(
+            response.aiter_bytes(),
+            status_code=response.status_code,
+            headers={
+                "Content-Type": "video/mp4",
+                "Content-Disposition": f'attachment; filename="{filename}"',
+                "Cache-Control": "public, max-age=3600",
+                "Access-Control-Allow-Origin": "*"
+            }
+        )
+
+@app.get("/api/proxy/stream")
+async def proxy_stream(url: str):
+    """Proxy stream through Megan API"""
+    decoded_url = unquote(url)
+    
+    async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Accept": "*/*",
+            "Referer": "https://movieapi.megan.qzz.io/",
+        }
+        
+        response = await client.get(decoded_url, headers=headers)
+        
+        return StreamingResponse(
+            response.aiter_bytes(),
+            status_code=response.status_code,
+            headers={
+                "Content-Type": "video/mp4",
+                "Cache-Control": "public, max-age=3600",
+                "Access-Control-Allow-Origin": "*"
+            }
+        )

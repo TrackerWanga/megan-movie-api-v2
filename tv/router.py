@@ -399,3 +399,53 @@ async def get_tv_seasons(title: str, year: Optional[int] = None):
         "seasons": seasons,
         "example": f"/api/tv/{title}/episode?season=1&episode=1"
     }
+
+# ============================================
+# REPLACE EPISODE DOWNLOAD WITH PRINCE
+# ============================================
+
+@router.get("/{title}/episode")
+async def get_tv_episode_prince(
+    title: str,
+    season: int = Query(..., ge=1),
+    episode: int = Query(..., ge=1),
+    year: Optional[int] = None
+):
+    """Get episode download URLs (powered by Megan CDN)"""
+    
+    # Search for the series
+    search = Search(session, query=title, subject_type=SubjectType.TV_SERIES)
+    results = await search.get_content_model()
+    
+    if not results.items:
+        raise HTTPException(status_code=404, detail="TV series not found")
+    
+    series_item = results.items[0]
+    subject_id = series_item.subjectId
+    
+    # Get from PRINCE API
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        prince_response = await client.get(f"{PRINCE_API}/api/sources/{subject_id}?season={season}&episode={episode}")
+        prince_data = prince_response.json()
+    
+    # Transform downloads
+    downloads = []
+    for source in prince_data.get("results", []):
+        if source.get("type") == "direct":
+            original_url = source.get("download_url") or source.get("embed_url")
+            
+            proxied_url = f"{MEGAN_DOMAIN}/api/proxy/dl?url={quote(original_url, safe='')}&title={quote(series_item.title)}_S{season}E{episode}&quality={source.get('quality')}"
+            
+            downloads.append({
+                "quality": source.get("quality"),
+                "size_mb": round(int(source.get("size", 0)) / 1024 / 1024, 2) if source.get("size") else 0,
+                "url": proxied_url
+            })
+    
+    return {
+        "success": True,
+        "series": series_item.title,
+        "season": season,
+        "episode": episode,
+        "downloads": downloads
+    }
