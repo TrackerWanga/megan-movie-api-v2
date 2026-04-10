@@ -1,7 +1,6 @@
-from fastapi import APIRouter, Query
-from typing import Optional
+from fastapi import APIRouter, Query, HTTPException
+from typing import Optional, List, Dict, Any
 import httpx
-import re
 from datetime import datetime
 
 from moviebox_api.v2 import Search, Session
@@ -9,7 +8,7 @@ from moviebox_api.v2.core import SubjectType
 
 router = APIRouter(prefix="/api/search", tags=["search"])
 
-# Type mapping
+# Type mapping for response
 TYPE_MAP = {
     1: "movie",
     2: "tv_series",
@@ -19,77 +18,30 @@ TYPE_MAP = {
     7: "anime"
 }
 
+# Type filter mapping
 TYPE_FILTERS = {
     "all": None,
-    "movie": 1,
-    "tv": 2,
-    "anime": 3,
-    "education": 4,
-    "music": 6
+    "movie": SubjectType.MOVIES,
+    "tv": SubjectType.TV_SERIES,
+    "anime": SubjectType.ANIME,
+    "education": SubjectType.EDUCATION,
+    "music": SubjectType.MUSIC
 }
 
-# OMDb configuration
-OMDB_API_KEY = "9b5d7e52"
-OMDB_URL = "http://www.omdbapi.com/"
-omdb_cache = {}
-
-async def get_imdb_id_from_omdb(title: str, year: int = None) -> Optional[str]:
-    cache_key = f"{title}_{year}" if year else title
-    if cache_key in omdb_cache:
-        return omdb_cache[cache_key]
-    
-    try:
-        params = {"apikey": OMDB_API_KEY, "t": title}
-        if year:
-            params["y"] = year
-        
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            response = await client.get(OMDB_URL, params=params)
-            data = response.json()
-            if data.get("Response") == "True":
-                imdb_id = data.get("imdbID")
-                omdb_cache[cache_key] = imdb_id
-                return imdb_id
-    except Exception as e:
-        print(f"OMDb error for {title}: {e}")
-    
-    omdb_cache[cache_key] = None
-    return None
-
-def extract_imdb_from_item(item) -> Optional[str]:
-    if hasattr(item, 'ops') and item.ops:
-        try:
-            import json
-            ops_data = json.loads(item.ops) if isinstance(item.ops, str) else item.ops
-            if 'imdb_id' in ops_data:
-                return ops_data['imdb_id']
-        except:
-            pass
-    
-    if hasattr(item, 'imdbId') and item.imdbId:
-        return item.imdbId
-    
-    if hasattr(item, 'detailPath') and item.detailPath:
-        match = re.search(r'tt\d{7}', item.detailPath)
-        if match:
-            return match.group(0)
-    
-    return None
-
-def generate_megan_id(imdb_id: str = None, subject_id: str = None) -> str:
-    if imdb_id:
-        return f"megan-{imdb_id}"
-    elif subject_id:
-        return f"megan-{subject_id}"
-    return "megan-unknown"
+def generate_megan_id(subject_id: str) -> str:
+    """Generate Megan ID from subjectId"""
+    return f"megan-{subject_id}"
 
 @router.get("")
 async def search_all(
-    q: str = Query(..., min_length=1),
-    type: str = Query("all"),
-    limit: int = Query(20, ge=1, le=50),
-    include_imdb: bool = Query(True)
+    q: str = Query(..., min_length=1, description="Search query"),
+    type: str = Query("all", description="Filter by type: all, movie, tv, anime, music, education"),
+    limit: int = Query(20, ge=1, le=50, description="Results limit")
 ):
+    """
+    Search across all content types with complete metadata
+    Returns: title, year, rating, genres, poster, subjectId, megan_id, and more
+    """
     session = Session()
     subject_type = TYPE_FILTERS.get(type)
     
@@ -101,40 +53,61 @@ async def search_all(
         
         results = await search.get_content_model()
     except Exception as e:
-        return {"success": False, "error": str(e), "query": q}
+        return {
+            "success": False,
+            "error": str(e),
+            "query": q
+        }
     
     items = []
     for item in results.items[:limit]:
-        item_type = TYPE_MAP.get(item.subjectType, "unknown")
+        # Get year
         year = item.releaseDate.year if item.releaseDate else None
         
-        imdb_id = extract_imdb_from_item(item)
-        if not imdb_id and include_imdb and year:
-            imdb_id = await get_imdb_id_from_omdb(item.title, year)
+        # Get content type
+        content_type = TYPE_MAP.get(item.subjectType, "unknown")
         
-        megan_id = generate_megan_id(imdb_id, str(item.subjectId) if item.subjectId else None)
+        # Get poster URL
+        poster_url = str(item.cover.url) if item.cover else None
         
+        # Calculate duration in minutes
+        duration_min = item.duration // 60 if item.duration else None
+        
+        # Build result item
         items.append({
+            "megan_id": generate_megan_id(str(item.subjectId)),
             "title": item.title,
             "year": year,
-            "type": item_type,
+            "type": content_type,
+            "type_id": item.subjectType if hasattr(item.subjectType, 'value') else item.subjectType,
             "rating": item.imdbRatingValue,
-            "poster": item.cover.url if item.cover else None,
-            "subjectId": str(item.subjectId) if item.subjectId else None,
-            "detailPath": item.detailPath,
-            "megan_id": megan_id,
-            "imdb_id": imdb_id
+            "genres": item.genre if isinstance(item.genre, list) else [item.genre] if item.genre else [],
+            "poster": poster_url,
+            "detail_path": item.detailPath,
+            "subject_id": str(item.subjectId),
+            "has_download": item.hasResource,
+            "duration_minutes": duration_min,
+            "country": item.countryName if hasattr(item, 'countryName') else None
         })
     
     return {
         "success": True,
         "query": q,
+        "type_filter": type,
         "total": len(items),
+        "timestamp": datetime.now().isoformat(),
         "results": items
     }
 
 @router.get("/quick")
-async def search_quick(q: str = Query(..., min_length=1), type: str = Query("all"), limit: int = Query(20, ge=1, le=50)):
+async def search_quick(
+    q: str = Query(..., min_length=1, description="Search query"),
+    type: str = Query("all", description="Filter by type"),
+    limit: int = Query(20, ge=1, le=50)
+):
+    """
+    Quick search - minimal metadata (faster)
+    """
     session = Session()
     subject_type = TYPE_FILTERS.get(type)
     
@@ -150,21 +123,30 @@ async def search_quick(q: str = Query(..., min_length=1), type: str = Query("all
     items = []
     for item in results.items[:limit]:
         year = item.releaseDate.year if item.releaseDate else None
-        item_type = TYPE_MAP.get(item.subjectType, "unknown")
+        content_type = TYPE_MAP.get(item.subjectType, "unknown")
+        poster_url = str(item.cover.url) if item.cover else None
+        
         items.append({
             "title": item.title,
             "year": year,
-            "type": item_type,
+            "type": content_type,
             "rating": item.imdbRatingValue,
-            "poster": item.cover.url if item.cover else None,
-            "detailPath": item.detailPath,
-            "subjectId": str(item.subjectId) if item.subjectId else None
+            "poster": poster_url,
+            "detail_path": item.detailPath,
+            "subject_id": str(item.subjectId)
         })
     
-    return {"success": True, "query": q, "total": len(items), "results": items}
+    return {
+        "success": True,
+        "query": q,
+        "type_filter": type,
+        "total": len(items),
+        "results": items
+    }
 
 @router.get("/types")
 async def get_available_types():
+    """Get list of available content types"""
     return {
         "success": True,
         "types": [
