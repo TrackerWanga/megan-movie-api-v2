@@ -151,81 +151,90 @@ async def get_unified_sources(subject_id: str, season: int = None, episode: int 
 # ============================================
 
 @app.get("/api/stream")
-async def proxy_stream(url: str, range: str = None):
-    """Proxy stream a video URL - hides real CDN URL"""
+async def proxy_stream(url: str):
+    """Proxy stream a video URL - with working CDN headers"""
     decoded_url = unquote(url)
-    print(f"📺 Streaming: {decoded_url[:100]}...")
     
     try:
+        cookie = None
+        try:
+            from movies.router import session as movie_session
+            if hasattr(movie_session, '_client'):
+                client = movie_session._client
+                if hasattr(client, 'cookies'):
+                    for c in client.cookies.jar:
+                        if c.name == 'token':
+                            cookie = c.value
+                            break
+        except:
+            pass
+        
         async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
             headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Origin": "https://videodownloader.site/",
+                "Referer": "https://videodownloader.site/",
+                "User-Agent": "Mozilla/5.0 (X11; Linux x86_64; rv:137.0) Gecko/20100101 Firefox/137.0",
                 "Accept": "*/*",
-                "Accept-Language": "en-US,en;q=0.9",
-                "Accept-Encoding": "identity",
-                "Referer": "https://movieapi.princetechn.com/",
-                "Origin": "https://movieapi.princetechn.com",
-                "Connection": "keep-alive",
-                "Sec-Fetch-Dest": "video",
-                "Sec-Fetch-Mode": "no-cors",
-                "Sec-Fetch-Site": "cross-site",
             }
-            if range:
-                headers["Range"] = range
-
+            
+            if cookie:
+                headers["Cookie"] = f"token={cookie}"
+            
             response = await client.get(decoded_url, headers=headers)
             
-            if response.status_code != 200 and response.status_code != 206:
-                print(f"❌ CDN returned {response.status_code}")
-                return {"error": f"CDN returned {response.status_code}", "success": False}
-
             return StreamingResponse(
                 response.aiter_bytes(),
                 status_code=response.status_code,
                 headers={
-                    "Content-Type": response.headers.get("content-type", "video/mp4"),
-                    "Content-Length": response.headers.get("content-length", ""),
-                    "Accept-Ranges": "bytes",
+                    "Content-Type": "video/mp4",
                     "Cache-Control": "public, max-age=3600",
                     "Access-Control-Allow-Origin": "*"
                 }
             )
     except Exception as e:
-        print(f"❌ Stream error: {e}")
         return {"error": str(e), "success": False}
-
 # ============================================
 # ENHANCED PROXY DOWNLOAD (Hides CDN)
 # ============================================
 
 @app.get("/api/dl")
 async def proxy_download(url: str, title: str = "video", quality: str = "1080p"):
-    """Proxy download a video URL - hides real CDN URL"""
+    """Proxy download a video URL - with working CDN headers"""
     decoded_url = unquote(url)
     print(f"⬇️ Downloading: {title} ({quality})")
-    print(f"   URL: {decoded_url[:100]}...")
     
     try:
+        cookie = None
+        try:
+            from movies.router import session as movie_session
+            if hasattr(movie_session, '_client'):
+                client = movie_session._client
+                if hasattr(client, 'cookies'):
+                    for c in client.cookies.jar:
+                        if c.name == 'token':
+                            cookie = c.value
+                            break
+        except:
+            pass
+        
         async with httpx.AsyncClient(timeout=120.0, follow_redirects=True) as client:
             headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Origin": "https://videodownloader.site/",
+                "Referer": "https://videodownloader.site/",
+                "User-Agent": "Mozilla/5.0 (X11; Linux x86_64; rv:137.0) Gecko/20100101 Firefox/137.0",
                 "Accept": "*/*",
-                "Accept-Language": "en-US,en;q=0.9",
-                "Accept-Encoding": "identity",
-                "Referer": "https://movieapi.princetechn.com/",
-                "Origin": "https://movieapi.princetechn.com",
+                "Accept-Encoding": "gzip, deflate",
                 "Connection": "keep-alive",
-                "Sec-Fetch-Dest": "video",
-                "Sec-Fetch-Mode": "no-cors",
-                "Sec-Fetch-Site": "cross-site",
             }
-
+            
+            if cookie:
+                headers["Cookie"] = f"token={cookie}"
+            
             response = await client.get(decoded_url, headers=headers)
             
             if response.status_code != 200:
-                print(f"❌ CDN returned {response.status_code}")
                 return {"error": f"CDN returned {response.status_code}", "success": False}
-
+            
             filename = f"{title.replace(' ', '_')}_{quality}.mp4"
             
             return StreamingResponse(
@@ -241,9 +250,7 @@ async def proxy_download(url: str, title: str = "video", quality: str = "1080p")
                 }
             )
     except Exception as e:
-        print(f"❌ Download error: {e}")
         return {"error": str(e), "success": False}
-
 # ============================================
 # LEGACY PROXY ENDPOINTS (for compatibility)
 # ============================================
