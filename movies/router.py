@@ -1,49 +1,16 @@
 from fastapi import APIRouter, Query, HTTPException
 from typing import Optional
-import httpx
-from urllib.parse import quote
+from datetime import datetime
 
 from moviebox_api.v2 import Search, Session
-from moviebox_api.v2.download import DownloadableSingleFilesDetail
+from moviebox_api.v2 import MovieDetails
 from moviebox_api.v2.core import SubjectType
+
+from helpers import get_prince_downloads, get_vidsrc_streams, get_omdb_data
 
 router = APIRouter(prefix="/api/movies", tags=["movies"])
 
-# Configuration
-OMDB_API_KEY = "9b5d7e52"
-OMDB_URL = "http://www.omdbapi.com/"
-PRINCE_API = "https://movieapi.princetechn.com"
-MEGAN_DOMAIN = "https://movieapi.megan.qzz.io"
-
-# Cache
-omdb_cache = {}
 session = Session()
-
-async def get_omdb_data(imdb_id: str = None, title: str = None, year: int = None):
-    cache_key = imdb_id or f"{title}_{year}"
-    if cache_key in omdb_cache:
-        return omdb_cache[cache_key]
-    
-    params = {"apikey": OMDB_API_KEY, "plot": "full"}
-    if imdb_id:
-        params["i"] = imdb_id
-    elif title:
-        params["t"] = title
-        if year:
-            params["y"] = year
-    
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        try:
-            response = await client.get(OMDB_URL, params=params)
-            data = response.json()
-            if data.get("Response") == "True":
-                omdb_cache[cache_key] = data
-                return data
-        except Exception as e:
-            print(f"OMDb error: {e}")
-    
-    omdb_cache[cache_key] = None
-    return None
 
 def generate_megan_id(imdb_id: str = None, subject_id: str = None) -> str:
     if imdb_id:
@@ -84,7 +51,6 @@ async def get_movie(title: str, year: Optional[int] = None):
     subject_id = movie_item.subjectId
     
     # 2. Get full movie details
-    from moviebox_api.v2 import MovieDetails
     details_obj = MovieDetails(session)
     full_details = await details_obj.get_content(movie_item.detailPath)
     
@@ -92,38 +58,13 @@ async def get_movie(title: str, year: Optional[int] = None):
     omdb_data = await get_omdb_data(title=movie_item.title, year=movie_item.releaseDate.year if movie_item.releaseDate else None)
     imdb_id = omdb_data.get("imdbID") if omdb_data else None
     
-    # 4. Get downloads from PRINCE API
-    downloads = []
-    try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            prince_response = await client.get(f"{PRINCE_API}/api/sources/{subject_id}")
-            if prince_response.status_code == 200:
-                prince_data = prince_response.json()
-                for source in prince_data.get("results", []):
-                    if source.get("type") == "direct":
-                        original_url = source.get("download_url") or source.get("embed_url")
-                        if original_url:
-                            downloads.append({
-                                "quality": source.get("quality"),
-                                "size_mb": round(int(source.get("size", 0)) / 1024 / 1024, 2) if source.get("size") else 0,
-                                "url": original_url,
-                                "proxied_url": f"{MEGAN_DOMAIN}/api/proxy/dl?url={quote(original_url, safe='')}&title={quote(movie_item.title)}&quality={source.get('quality')}"
-                            })
-    except Exception as e:
-        print(f"PRINCE API error: {e}")
+    # 4. Get downloads from PRINCE (using helper)
+    downloads = await get_prince_downloads(subject_id)
     
-    # 5. Get streams
+    # 5. Get streams from vidsrc (fallback)
     streams = []
     if imdb_id:
-        try:
-            async with httpx.AsyncClient(timeout=15.0) as client:
-                response = await client.get(f"https://megan-vidsrc.vercel.app/api/streams/{imdb_id}")
-                if response.status_code == 200:
-                    data = response.json()
-                    if data.get("success"):
-                        streams = data.get("streams", [])
-        except:
-            pass
+        streams = await get_vidsrc_streams(imdb_id)
     
     # 6. Build response
     poster = extract_image(movie_item)
