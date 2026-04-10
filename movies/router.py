@@ -16,7 +16,38 @@ MEGAN_DOMAIN = "https://movieapi.megan.qzz.io"
 OMDB_API_KEY = "9b5d7e52"
 VIDSRC_API = "https://megan-vidsrc.vercel.app"
 
+# Global session for MovieBox API
 session = Session()
+
+# Store the working cookie (will be refreshed periodically)
+WORKING_COOKIE = None
+
+def get_session_cookie():
+    """Get the token cookie from the MovieBox session"""
+    global WORKING_COOKIE
+    if hasattr(session, '_client'):
+        client = session._client
+        if hasattr(client, 'cookies'):
+            for cookie in client.cookies.jar:
+                if cookie.name == 'token':
+                    WORKING_COOKIE = cookie.value
+                    return cookie.value
+    return WORKING_COOKIE
+
+def get_cdn_headers():
+    """Get the headers required for CDN access"""
+    cookie = get_session_cookie()
+    headers = {
+        "Origin": "https://videodownloader.site/",
+        "Referer": "https://videodownloader.site/",
+        "User-Agent": "Mozilla/5.0 (X11; Linux x86_64; rv:137.0) Gecko/20100101 Firefox/137.0",
+        "Accept": "*/*",
+        "Accept-Encoding": "gzip, deflate",
+        "Connection": "keep-alive",
+    }
+    if cookie:
+        headers["Cookie"] = f"token={cookie}"
+    return headers
 
 def generate_megan_id(imdb_id: str = None, subject_id: str = None) -> str:
     if imdb_id:
@@ -50,14 +81,14 @@ def create_proxied_stream(raw_url: str) -> str:
 @router.get("/{title}")
 async def get_movie(title: str, year: Optional[int] = None):
     """Get complete movie details with metadata and available downloads"""
-    
+
     # 1. Search for movie
     search_obj = Search(session, query=title, subject_type=SubjectType.MOVIES)
     results = await search_obj.get_content_model()
-    
+
     if not results.items:
         raise HTTPException(status_code=404, detail="Movie not found")
-    
+
     # Find best match
     movie_item = None
     for item in results.items:
@@ -66,13 +97,13 @@ async def get_movie(title: str, year: Optional[int] = None):
             break
     if not movie_item:
         movie_item = results.items[0]
-    
+
     subject_id = movie_item.subjectId
-    
+
     # 2. Get full movie details
     details_obj = MovieDetails(session)
     full_details = await details_obj.get_content(movie_item.detailPath)
-    
+
     # 3. Get OMDb data (for ratings, director, etc.)
     omdb_data = None
     imdb_id = None
@@ -88,13 +119,13 @@ async def get_movie(title: str, year: Optional[int] = None):
                     imdb_id = omdb_data.get("imdbID")
     except Exception as e:
         print(f"OMDb error: {e}")
-    
-    # 4. Get available download qualities (but don't include URLs - they expire)
+
+    # 4. Get available download qualities
     available_qualities = []
     try:
         downloads_obj = DownloadableSingleFilesDetail(session, movie_item)
         download_data = await downloads_obj.get_content()
-        
+
         if download_data and 'downloads' in download_data:
             for dl in download_data['downloads']:
                 quality = f"{dl.get('resolution', 'unknown')}p"
@@ -103,7 +134,7 @@ async def get_movie(title: str, year: Optional[int] = None):
                     size_mb = round(int(size_val) / 1024 / 1024, 2)
                 except:
                     size_mb = 0
-                    
+
                 available_qualities.append({
                     "quality": quality,
                     "size_mb": size_mb,
@@ -112,7 +143,7 @@ async def get_movie(title: str, year: Optional[int] = None):
                 })
     except Exception as e:
         print(f"Downloads error: {e}")
-    
+
     # 5. Get streams from vidsrc (fallback)
     streams = []
     if imdb_id:
@@ -125,10 +156,10 @@ async def get_movie(title: str, year: Optional[int] = None):
                         streams = data.get("streams", [])
         except Exception as e:
             print(f"Vidsrc error: {e}")
-    
+
     # 6. Build response
     poster = extract_image(movie_item)
-    
+
     backdrop = None
     if movie_item and hasattr(movie_item, 'stills') and movie_item.stills:
         backdrop = {
@@ -137,7 +168,7 @@ async def get_movie(title: str, year: Optional[int] = None):
             "height": movie_item.stills.height,
             "size_kb": round(movie_item.stills.size / 1024, 2) if movie_item.stills.size else 0
         }
-    
+
     trailer = None
     if full_details and 'subject' in full_details:
         trailer_data = full_details.get('subject', {}).get('trailer', {})
@@ -147,7 +178,7 @@ async def get_movie(title: str, year: Optional[int] = None):
                 "duration": trailer_data['videoAddress'].get('duration'),
                 "thumbnail": trailer_data.get('cover', {}).get('url') if trailer_data.get('cover') else None
             }
-    
+
     cast = []
     if full_details and 'stars' in full_details:
         for star in full_details.get('stars', [])[:15]:
@@ -156,14 +187,14 @@ async def get_movie(title: str, year: Optional[int] = None):
                 "character": star.get('character'),
                 "avatar": star.get('avatarUrl')
             })
-    
+
     subtitles = []
     if movie_item and hasattr(movie_item, 'subtitles') and movie_item.subtitles:
         subs = movie_item.subtitles.split(',') if isinstance(movie_item.subtitles, str) else movie_item.subtitles
         for sub in subs[:20]:
             if sub.strip():
                 subtitles.append({"language": sub.strip(), "code": sub.strip()[:2].lower()})
-    
+
     return {
         "success": True,
         "api": "Megan Movie API",
@@ -195,7 +226,7 @@ async def get_movie(title: str, year: Optional[int] = None):
                 "available_qualities": available_qualities,
                 "streams": streams,
                 "total_qualities": len(available_qualities),
-                "note": "Use /api/movies/{title}/download?quality={quality} to get a fresh download URL. URLs expire quickly - fetch them right before downloading!"
+                "note": "Use /api/movies/{title}/download?quality={quality} to get a fresh download URL."
             }
         }
     }
@@ -206,15 +237,15 @@ async def get_fresh_download(
     quality: str = Query("1080p", description="Desired quality: 360p, 480p, 720p, 1080p"),
     year: Optional[int] = None
 ):
-    """Get a FRESH download URL - fetches from MovieBox API on every request"""
-    
+    """Get a FRESH download URL with working headers"""
+
     # 1. Search for movie
     search_obj = Search(session, query=title, subject_type=SubjectType.MOVIES)
     results = await search_obj.get_content_model()
-    
+
     if not results.items:
         raise HTTPException(status_code=404, detail="Movie not found")
-    
+
     # Find best match
     movie_item = None
     for item in results.items:
@@ -223,15 +254,15 @@ async def get_fresh_download(
             break
     if not movie_item:
         movie_item = results.items[0]
-    
+
     # 2. Get FRESH download URLs from MovieBox API
     try:
         downloads_obj = DownloadableSingleFilesDetail(session, movie_item)
         download_data = await downloads_obj.get_content()
-        
+
         if not download_data or 'downloads' not in download_data:
             raise HTTPException(status_code=404, detail="No downloads available for this movie")
-        
+
         # Find requested quality
         selected_dl = None
         for dl in download_data['downloads']:
@@ -239,37 +270,37 @@ async def get_fresh_download(
             if dl_quality.lower() == quality.lower():
                 selected_dl = dl
                 break
-        
-        # If quality not found, try to find closest or return best available
+
         if not selected_dl:
-            # Try without 'p' suffix
             quality_base = quality.replace('p', '')
             for dl in download_data['downloads']:
                 if str(dl.get('resolution')) == quality_base:
                     selected_dl = dl
                     break
-        
+
         if not selected_dl:
-            # Return highest quality available
             selected_dl = download_data['downloads'][-1]
-        
+
         raw_url = selected_dl.get('url')
         if not raw_url:
             raise HTTPException(status_code=500, detail="Download URL not found")
-            
+
         dl_quality = f"{selected_dl.get('resolution')}p"
-        
+
         # Create FRESH proxied URL
         proxied_url = create_proxied_url(raw_url, movie_item.title, dl_quality)
         stream_url = create_proxied_stream(raw_url)
-        
+
         # Calculate size
         size_bytes = selected_dl.get('size', 0)
         try:
             size_mb = round(int(size_bytes) / 1024 / 1024, 2)
         except:
             size_mb = 0
-        
+
+        # Get the working cookie for curl example
+        cookie = get_session_cookie()
+
         return {
             "success": True,
             "fresh_url": True,
@@ -285,12 +316,18 @@ async def get_fresh_download(
                 "size_mb": size_mb,
                 "size_bytes": size_bytes,
                 "format": selected_dl.get('format', 'mp4'),
+                "raw_url": raw_url,
                 "url": proxied_url,
                 "stream_url": stream_url,
-                "note": "⚠️ This URL was just generated and will expire quickly. Download immediately!"
+                "headers_required": {
+                    "Origin": "https://videodownloader.site/",
+                    "Referer": "https://videodownloader.site/",
+                    "Cookie": f"token={cookie}" if cookie else "token=<required>"
+                },
+                "note": "⚠️ This URL requires proper headers. Use the proxied URL for automatic header handling."
             }
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -300,15 +337,13 @@ async def get_fresh_download(
 @router.get("/{title}/qualities")
 async def get_available_qualities(title: str, year: Optional[int] = None):
     """Get available download qualities for a movie"""
-    
-    # Search for movie
+
     search_obj = Search(session, query=title, subject_type=SubjectType.MOVIES)
     results = await search_obj.get_content_model()
-    
+
     if not results.items:
         raise HTTPException(status_code=404, detail="Movie not found")
-    
-    # Find best match
+
     movie_item = None
     for item in results.items:
         if year and item.releaseDate and item.releaseDate.year == year:
@@ -316,13 +351,12 @@ async def get_available_qualities(title: str, year: Optional[int] = None):
             break
     if not movie_item:
         movie_item = results.items[0]
-    
-    # Get available qualities
+
     qualities = []
     try:
         downloads_obj = DownloadableSingleFilesDetail(session, movie_item)
         download_data = await downloads_obj.get_content()
-        
+
         if download_data and 'downloads' in download_data:
             for dl in download_data['downloads']:
                 quality = f"{dl.get('resolution')}p"
@@ -331,7 +365,7 @@ async def get_available_qualities(title: str, year: Optional[int] = None):
                     size_mb = round(int(size_val) / 1024 / 1024, 2)
                 except:
                     size_mb = 0
-                    
+
                 qualities.append({
                     "quality": quality,
                     "size_mb": size_mb,
@@ -340,7 +374,7 @@ async def get_available_qualities(title: str, year: Optional[int] = None):
                 })
     except Exception as e:
         print(f"Error getting qualities: {e}")
-    
+
     return {
         "success": True,
         "movie": movie_item.title,
@@ -348,3 +382,22 @@ async def get_available_qualities(title: str, year: Optional[int] = None):
         "available_qualities": qualities,
         "note": "Use the download_endpoint to get a fresh URL for your desired quality"
     }
+
+# Cookie refresh endpoint (call this periodically)
+@router.get("/session/refresh")
+async def refresh_session():
+    """Refresh the MovieBox session to get a new token cookie"""
+    try:
+        search_obj = Search(session, query="Avatar", subject_type=SubjectType.MOVIES)
+        await search_obj.get_content_model()
+        cookie = get_session_cookie()
+        return {
+            "success": True,
+            "message": "Session refreshed successfully",
+            "has_cookie": cookie is not None
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e)
+        }
