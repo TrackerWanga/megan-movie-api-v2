@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import RedirectResponse, FileResponse, HTMLResponse, StreamingResponse
 from datetime import datetime
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 
 if not hasattr(enum, 'StrEnum'):
     try:
@@ -29,7 +29,7 @@ from music.router import router as music_router
 from anime.router import router as anime_router
 from education.router import router as education_router
 
-# PRINCE API as hidden backend
+# Configuration
 PRINCE_API = "https://movieapi.princetechn.com"
 DOMAIN = "movieapi.megan.qzz.io"
 BASE_URL = f"https://{DOMAIN}"
@@ -78,7 +78,7 @@ async def prince_search(query: str, type: int = 1, page: int = 1):
 
 @app.get("/api/prince/sources/{subject_id}")
 async def prince_sources(subject_id: str, season: int = None, episode: int = None):
-    """Get sources from PRINCE API (this is the key!)"""
+    """Get sources from PRINCE API"""
     params = {}
     if season:
         params["season"] = season
@@ -105,17 +105,14 @@ async def prince_download(subject_id: str, season: int = None, episode: int = No
 @app.get("/api/sources/{subject_id}")
 async def get_unified_sources(subject_id: str, season: int = None, episode: int = None):
     """Get sources - uses PRINCE API internally but hides it"""
-    
-    # Fetch from PRINCE API
     params = {}
     if season:
         params["season"] = season
     if episode:
         params["episode"] = episode
-    
+
     prince_result = await fetch_from_prince(f"/api/sources/{subject_id}", params)
-    
-    # Transform response to hide PRINCE
+
     transformed = {
         "success": True,
         "status": 200,
@@ -125,22 +122,19 @@ async def get_unified_sources(subject_id: str, season: int = None, episode: int 
         "subject_id": subject_id,
         "sources": []
     }
-    
-    # Process sources and proxy them through your API
+
     for source in prince_result.get("results", []):
         provider = source.get("provider", "Unknown")
         embed_url = source.get("embed_url", "")
         download_url = source.get("download_url", "")
-        
-        # If it's a direct download URL, proxy it through your API
+
         if "bcdnxw" in embed_url or "hakunaymatata" in embed_url:
-            # Replace with your proxied URL
             proxied_embed = f"{BASE_URL}/api/stream?url={quote(embed_url, safe='')}"
             proxied_download = f"{BASE_URL}/api/dl?url={quote(download_url, safe='')}&title={prince_result.get('title', 'video')}"
         else:
             proxied_embed = embed_url
             proxied_download = download_url
-        
+
         transformed["sources"].append({
             "provider": provider,
             "quality": source.get("quality", "Auto"),
@@ -148,31 +142,43 @@ async def get_unified_sources(subject_id: str, season: int = None, episode: int 
             "embed_url": proxied_embed,
             "download_url": proxied_download
         })
-    
-    # Add subtitles
+
     transformed["subtitles"] = prince_result.get("subtitles", [])
-    
     return transformed
 
 # ============================================
-# PROXY STREAM (Hides PRINCE CDN)
+# ENHANCED PROXY STREAM (Hides CDN)
 # ============================================
 
 @app.get("/api/stream")
 async def proxy_stream(url: str, range: str = None):
     """Proxy stream a video URL - hides real CDN URL"""
+    decoded_url = unquote(url)
+    print(f"📺 Streaming: {decoded_url[:100]}...")
+    
     try:
         async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
             headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
                 "Accept": "*/*",
-                "Referer": f"{BASE_URL}/",
+                "Accept-Language": "en-US,en;q=0.9",
+                "Accept-Encoding": "identity",
+                "Referer": "https://movieapi.princetechn.com/",
+                "Origin": "https://movieapi.princetechn.com",
+                "Connection": "keep-alive",
+                "Sec-Fetch-Dest": "video",
+                "Sec-Fetch-Mode": "no-cors",
+                "Sec-Fetch-Site": "cross-site",
             }
             if range:
                 headers["Range"] = range
+
+            response = await client.get(decoded_url, headers=headers)
             
-            response = await client.get(url, headers=headers)
-            
+            if response.status_code != 200 and response.status_code != 206:
+                print(f"❌ CDN returned {response.status_code}")
+                return {"error": f"CDN returned {response.status_code}", "success": False}
+
             return StreamingResponse(
                 response.aiter_bytes(),
                 status_code=response.status_code,
@@ -185,35 +191,72 @@ async def proxy_stream(url: str, range: str = None):
                 }
             )
     except Exception as e:
+        print(f"❌ Stream error: {e}")
         return {"error": str(e), "success": False}
+
+# ============================================
+# ENHANCED PROXY DOWNLOAD (Hides CDN)
+# ============================================
 
 @app.get("/api/dl")
 async def proxy_download(url: str, title: str = "video", quality: str = "1080p"):
-    """Proxy download a video URL"""
+    """Proxy download a video URL - hides real CDN URL"""
+    decoded_url = unquote(url)
+    print(f"⬇️ Downloading: {title} ({quality})")
+    print(f"   URL: {decoded_url[:100]}...")
+    
     try:
         async with httpx.AsyncClient(timeout=120.0, follow_redirects=True) as client:
             headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
                 "Accept": "*/*",
-                "Referer": f"{BASE_URL}/",
+                "Accept-Language": "en-US,en;q=0.9",
+                "Accept-Encoding": "identity",
+                "Referer": "https://movieapi.princetechn.com/",
+                "Origin": "https://movieapi.princetechn.com",
+                "Connection": "keep-alive",
+                "Sec-Fetch-Dest": "video",
+                "Sec-Fetch-Mode": "no-cors",
+                "Sec-Fetch-Site": "cross-site",
             }
+
+            response = await client.get(decoded_url, headers=headers)
             
-            response = await client.get(url, headers=headers)
-            
+            if response.status_code != 200:
+                print(f"❌ CDN returned {response.status_code}")
+                return {"error": f"CDN returned {response.status_code}", "success": False}
+
             filename = f"{title.replace(' ', '_')}_{quality}.mp4"
             
             return StreamingResponse(
                 response.aiter_bytes(),
-                status_code=response.status_code,
+                status_code=200,
                 headers={
                     "Content-Type": "video/mp4",
                     "Content-Disposition": f'attachment; filename="{filename}"',
+                    "Accept-Ranges": "bytes",
                     "Cache-Control": "public, max-age=3600",
-                    "Access-Control-Allow-Origin": "*"
+                    "Access-Control-Allow-Origin": "*",
+                    "Content-Length": response.headers.get("content-length", ""),
                 }
             )
     except Exception as e:
+        print(f"❌ Download error: {e}")
         return {"error": str(e), "success": False}
+
+# ============================================
+# LEGACY PROXY ENDPOINTS (for compatibility)
+# ============================================
+
+@app.get("/api/proxy/dl")
+async def proxy_download_legacy(url: str, title: str = "video", quality: str = "1080p"):
+    """Legacy proxy download endpoint"""
+    return await proxy_download(url, title, quality)
+
+@app.get("/api/proxy/stream")
+async def proxy_stream_legacy(url: str):
+    """Legacy proxy stream endpoint"""
+    return await proxy_stream(url)
 
 # ============================================
 # HTML PAGES
@@ -253,61 +296,3 @@ async def health_check():
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
-
-# ============================================
-# PROXY ENDPOINTS (Hide PRINCE CDN)
-# ============================================
-
-from urllib.parse import unquote
-
-@app.get("/api/proxy/dl")
-async def proxy_download(url: str, title: str = "video", quality: str = "1080p"):
-    """Proxy download through Megan API - hides real source"""
-    # Decode the URL
-    decoded_url = unquote(url)
-    
-    async with httpx.AsyncClient(timeout=120.0, follow_redirects=True) as client:
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Accept": "*/*",
-            "Referer": "https://movieapi.megan.qzz.io/",
-        }
-        
-        response = await client.get(decoded_url, headers=headers)
-        
-        filename = f"{title.replace(' ', '_')}_{quality}.mp4"
-        
-        return StreamingResponse(
-            response.aiter_bytes(),
-            status_code=response.status_code,
-            headers={
-                "Content-Type": "video/mp4",
-                "Content-Disposition": f'attachment; filename="{filename}"',
-                "Cache-Control": "public, max-age=3600",
-                "Access-Control-Allow-Origin": "*"
-            }
-        )
-
-@app.get("/api/proxy/stream")
-async def proxy_stream(url: str):
-    """Proxy stream through Megan API"""
-    decoded_url = unquote(url)
-    
-    async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Accept": "*/*",
-            "Referer": "https://movieapi.megan.qzz.io/",
-        }
-        
-        response = await client.get(decoded_url, headers=headers)
-        
-        return StreamingResponse(
-            response.aiter_bytes(),
-            status_code=response.status_code,
-            headers={
-                "Content-Type": "video/mp4",
-                "Cache-Control": "public, max-age=3600",
-                "Access-Control-Allow-Origin": "*"
-            }
-        )
