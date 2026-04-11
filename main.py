@@ -187,3 +187,17 @@ async def legacy_download():
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
+# Serve static files (HTML documentation)
+from fastapi.staticfiles import StaticFiles
+import os
+
+# Create static directory if not exists
+static_dir = os.path.join(os.path.dirname(__file__), "static")
+if os.path.exists(static_dir):
+    app.mount("/docs", StaticFiles(directory=static_dir, html=True), name="static")
+
+@app.get("/api/docs")
+async def api_docs_redirect():
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url="/docs/index.html")
