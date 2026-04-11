@@ -8,7 +8,7 @@ from moviebox_api.v2 import Homepage, Session
 router = APIRouter(prefix="/api", tags=["banners"])
 
 session = Session()
-WORKER_URL = "https://movieapi2.trackerwanga254.workers.dev"
+WORKER_URL = "https://streamapi.megan.qzz.io"
 
 def extract_image(item) -> Optional[Dict]:
     """Extract cover image from item"""

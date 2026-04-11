@@ -30,7 +30,7 @@ from education.router import router as education_router
 # Configuration
 DOMAIN = "movieapi.megan.qzz.io"
 BASE_URL = f"https://{DOMAIN}"
-WORKER_URL = "https://movieapi2.trackerwanga254.workers.dev"
+WORKER_URL = "https://streamapi.megan.qzz.io"
 
 app = FastAPI(title="Megan Movie API", version="3.0.0", docs_url=None, redoc_url=None)
 

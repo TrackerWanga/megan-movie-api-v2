@@ -10,7 +10,7 @@ from moviebox_api.v2.core import SubjectType
 router = APIRouter(prefix="/api/movies", tags=["movies"])
 
 # Configuration
-WORKER_URL = "https://movieapi2.trackerwanga254.workers.dev"
+WORKER_URL = "https://streamapi.megan.qzz.io"
 MEGAN_DOMAIN = "https://movieapi.megan.qzz.io"
 
 session = Session()

@@ -9,7 +9,7 @@ from moviebox_api.v2.core import SubjectType
 router = APIRouter(prefix="/api/search", tags=["search"])
 
 # Configuration
-WORKER_URL = "https://movieapi2.trackerwanga254.workers.dev"
+WORKER_URL = "https://streamapi.megan.qzz.io"
 
 # Type mapping
 TYPE_MAP = {
