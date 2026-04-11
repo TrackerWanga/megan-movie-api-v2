@@ -55,23 +55,27 @@ def get_homepage_data():
 @router.get("/homepage")
 async def get_complete_homepage():
     """Complete homepage - Python + Worker combined"""
-    
+
     home_data = await get_homepage_data()
-    
-    # Get Python banners
+
+    # Get banners from Worker (has working images!)
     banners = []
-    if hasattr(home_data, 'operatingList'):
-        for item in home_data.operatingList:
-            if hasattr(item, 'type') and item.type == "BANNER":
-                if hasattr(item, 'banner') and item.banner and hasattr(item.banner, 'items'):
-                    for banner_item in item.banner.items:
-                        banners.append({
-                            "title": banner_item.title if hasattr(banner_item, 'title') else None,
-                            "image": extract_image(banner_item.image) if hasattr(banner_item, 'image') else None,
-                            "subject_id": str(banner_item.subjectId) if hasattr(banner_item, 'subjectId') else None,
-                            "detail_path": banner_item.detailPath if hasattr(banner_item, 'detailPath') else None
-                        })
-    
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(f"{WORKER_URL}/home/banner")
+            if resp.status_code == 200:
+                data = resp.json()
+                for item in data.get('featured', []):
+                    poster_url = item.get('poster_url')
+                    banners.append({
+                        "title": item.get('name'),
+                        "image": {"url": poster_url} if poster_url else None,
+                        "subject_id": item.get('subject_id'),
+                        "detail_path": item.get('slug')
+                    })
+    except Exception as e:
+        print(f"Worker banner error: {e}")
+
     # Get Python trending
     trending = []
     if hasattr(home_data, 'operatingList'):
@@ -81,7 +85,7 @@ async def get_complete_homepage():
                     if hasattr(item, 'subjects'):
                         for subject in item.subjects:
                             trending.append(format_subject(subject))
-    
+
     # Get Python sections
     sections = {}
     section_map = {
@@ -100,7 +104,7 @@ async def get_complete_homepage():
         "upcoming": "Upcoming Calendar",
         "smartstart": "🧸 Smart Start Cartoons"
     }
-    
+
     if hasattr(home_data, 'operatingList'):
         for item in home_data.operatingList:
             if hasattr(item, 'type') and item.type in ["SUBJECTS_MOVIE", "APPOINTMENT_LIST"]:
@@ -109,7 +113,7 @@ async def get_complete_homepage():
                     if title == target_title and hasattr(item, 'subjects'):
                         sections[key] = [format_subject(s) for s in item.subjects]
                         break
-    
+
     # Get platforms
     platforms = []
     if hasattr(home_data, 'platformList'):
@@ -118,7 +122,7 @@ async def get_complete_homepage():
                 "name": item.name if hasattr(item, 'name') else None,
                 "uploaded_by": item.uploadBy if hasattr(item, 'uploadBy') else None
             })
-    
+
     # Get Worker sections (Hot, Cinema, Ranking)
     worker_data = {}
     try:
@@ -126,17 +130,17 @@ async def get_complete_homepage():
             hot_resp = await client.get(f"{WORKER_URL}/home/hot")
             if hot_resp.status_code == 200:
                 worker_data["hot"] = hot_resp.json()
-            
+
             cinema_resp = await client.get(f"{WORKER_URL}/home/cinema")
             if cinema_resp.status_code == 200:
                 worker_data["cinema"] = cinema_resp.json()
-            
+
             ranking_resp = await client.get(f"{WORKER_URL}/ranking")
             if ranking_resp.status_code == 200:
                 worker_data["ranking"] = ranking_resp.json()
     except:
         worker_data = {"hot": [], "cinema": [], "ranking": []}
-    
+
     return {
         "success": True,
         "api": "Megan Movie API",
@@ -160,28 +164,32 @@ async def get_complete_homepage():
     }
 
 # ============================================
-# MAIN BANNERS
+# MAIN BANNERS (Proxied from Worker)
 # ============================================
 
 @router.get("/homepage/banners")
 async def get_main_banners():
-    """Main hero banners"""
-    home_data = await get_homepage_data()
-
-    banners = []
-    if hasattr(home_data, 'operatingList'):
-        for item in home_data.operatingList:
-            if hasattr(item, 'type') and item.type == "BANNER":
-                if hasattr(item, 'banner') and item.banner and hasattr(item.banner, 'items'):
-                    for banner_item in item.banner.items:
-                        banners.append({
-                            "title": banner_item.title if hasattr(banner_item, 'title') else None,
-                            "image": extract_image(banner_item.image) if hasattr(banner_item, 'image') else None,
-                            "subject_id": str(banner_item.subjectId) if hasattr(banner_item, 'subjectId') else None,
-                            "detail_path": banner_item.detailPath if hasattr(banner_item, 'detailPath') else None
-                        })
-
-    return {"success": True, "total": len(banners), "banners": banners}
+    """Main hero banners - proxied from Worker (has working images!)"""
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(f"{WORKER_URL}/home/banner")
+            if resp.status_code != 200:
+                return {"success": False, "error": "Worker unavailable", "banners": []}
+            
+            data = resp.json()
+            banners = []
+            for item in data.get('featured', []):
+                poster_url = item.get('poster_url')
+                banners.append({
+                    "title": item.get('name'),
+                    "image": {"url": poster_url} if poster_url else None,
+                    "subject_id": item.get('subject_id'),
+                    "detail_path": item.get('slug')
+                })
+            
+            return {"success": True, "total": len(banners), "banners": banners}
+    except Exception as e:
+        return {"success": False, "error": str(e), "banners": []}
 
 # ============================================
 # TRENDING
