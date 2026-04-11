@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
     <title>Megan Movie API v3.0.0 - Documentation</title>
     
-    <link rel="icon" type="image/png" href="https://img.icons8.com/color/48/movie.png">
+    <link rel="icon" type="image/png" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='20' fill='%232c3e50'/%3E%3Ctext x='50' y='72' font-size='60' text-anchor='middle' fill='white' font-family='Arial' font-weight='bold'%3EM%3C/text%3E%3C/svg%3E">
     <link rel="stylesheet" type="text/css" href="https://unpkg.com/swagger-ui-dist@5.17.14/swagger-ui.css" />
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     
@@ -42,17 +42,17 @@
             --shadow-hover: 0 8px 24px rgba(0,0,0,0.1);
         }
         
-        /* Topbar - Professional Dark */
-        .swagger-ui .topbar {
+        /* Custom Header with SVG Logo and Typing Effect */
+        .custom-header {
             background: var(--primary);
-            padding: 16px 0;
+            padding: 20px 0;
             box-shadow: var(--shadow);
             position: sticky;
             top: 0;
             z-index: 1000;
         }
         
-        .swagger-ui .topbar .wrapper {
+        .custom-header .wrapper {
             display: flex;
             align-items: center;
             justify-content: space-between;
@@ -62,33 +62,73 @@
             margin: 0 auto;
         }
         
-        .swagger-ui .topbar a {
-            color: var(--white) !important;
-            font-weight: 600;
-            font-size: 22px;
-            text-decoration: none;
+        .header-left {
             display: flex;
             align-items: center;
-            gap: 10px;
+            gap: 16px;
+        }
+        
+        /* SVG Logo */
+        .logo-svg {
+            width: 48px;
+            height: 48px;
+            flex-shrink: 0;
+        }
+        
+        .logo-svg svg {
+            width: 100%;
+            height: 100%;
+        }
+        
+        .header-text {
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .header-title {
+            color: var(--white);
+            font-size: 28px;
+            font-weight: 700;
             letter-spacing: -0.02em;
+            line-height: 1.2;
         }
         
-        .swagger-ui .topbar a i {
-            font-size: 24px;
+        .header-subtitle {
+            color: rgba(255,255,255,0.8);
+            font-size: 14px;
+            font-weight: 400;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        
+        /* Typing Effect */
+        .typing-container {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        
+        .typing-text {
             color: var(--accent);
-        }
-        
-        .swagger-ui .topbar a span {
-            background: rgba(255,255,255,0.12);
-            padding: 4px 12px;
-            border-radius: 20px;
-            font-size: 13px;
             font-weight: 500;
-            letter-spacing: 0.3px;
         }
         
-        .api-badge {
-            background: rgba(255,255,255,0.1);
+        .cursor {
+            display: inline-block;
+            width: 2px;
+            height: 16px;
+            background: var(--accent);
+            animation: blink 0.8s infinite;
+        }
+        
+        @keyframes blink {
+            0%, 50% { opacity: 1; }
+            51%, 100% { opacity: 0; }
+        }
+        
+        .header-badge {
+            background: rgba(255,255,255,0.12);
             padding: 6px 14px;
             border-radius: 30px;
             color: var(--white);
@@ -98,9 +138,24 @@
             gap: 8px;
         }
         
-        .api-badge i {
+        .header-badge i {
             color: #2ecc71;
             font-size: 10px;
+        }
+        
+        .version-tag {
+            background: var(--accent);
+            color: white;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+            margin-left: 8px;
+        }
+        
+        /* Hide default Swagger topbar */
+        .swagger-ui .topbar {
+            display: none !important;
         }
         
         /* Main Content Area */
@@ -114,13 +169,13 @@
             padding: 0 24px;
         }
         
-        /* Info Section */
+        /* Info Section - Hide since we have custom header */
         .swagger-ui .info {
-            margin: 40px 0 30px;
+            margin: 30px 0 20px;
         }
         
         .swagger-ui .info .title {
-            font-size: 34px;
+            font-size: 28px;
             font-weight: 700;
             color: var(--primary);
             letter-spacing: -0.02em;
@@ -224,7 +279,7 @@
             letter-spacing: 0.5px;
         }
         
-        /* Method Colors - Professional */
+        /* Method Colors */
         .swagger-ui .opblock-get .opblock-summary-method {
             background: var(--accent);
             color: white;
@@ -454,36 +509,39 @@
             color: #e74c3c;
         }
         
-        /* Loading Spinner */
-        .swagger-ui .loading-container {
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            min-height: 300px;
+        /* Filter Bar */
+        .swagger-ui .filter-container {
+            margin: 20px 0;
         }
         
-        .spinner {
-            width: 40px;
-            height: 40px;
-            border: 3px solid var(--grey-light);
-            border-radius: 50%;
-            border-top-color: var(--accent);
-            animation: spin 0.8s ease-in-out infinite;
+        .swagger-ui .filter-container input {
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 12px 16px;
+            font-size: 14px;
+            background: var(--white);
+            box-shadow: var(--shadow);
         }
         
-        @keyframes spin {
-            to { transform: rotate(360deg); }
+        .swagger-ui .filter-container input:focus {
+            outline: none;
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.1);
         }
         
         /* Mobile Responsive */
         @media (max-width: 768px) {
-            .swagger-ui .topbar .wrapper {
+            .custom-header .wrapper {
                 flex-direction: column;
                 gap: 12px;
             }
             
+            .header-title {
+                font-size: 22px;
+            }
+            
             .swagger-ui .info .title {
-                font-size: 26px;
+                font-size: 22px;
             }
             
             .swagger-ui .opblock .opblock-summary {
@@ -507,37 +565,55 @@
         }
         
         @media (max-width: 480px) {
-            .swagger-ui .topbar a {
+            .header-title {
                 font-size: 18px;
             }
             
-            .swagger-ui .info .title {
-                font-size: 22px;
+            .logo-svg {
+                width: 40px;
+                height: 40px;
             }
-        }
-        
-        /* Filter Bar */
-        .swagger-ui .filter-container {
-            margin: 20px 0;
-        }
-        
-        .swagger-ui .filter-container input {
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            padding: 12px 16px;
-            font-size: 14px;
-            background: var(--white);
-            box-shadow: var(--shadow);
-        }
-        
-        .swagger-ui .filter-container input:focus {
-            outline: none;
-            border-color: var(--accent);
-            box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.1);
         }
     </style>
 </head>
 <body>
+    <!-- Custom Header with SVG Logo and Typing Effect -->
+    <header class="custom-header">
+        <div class="wrapper">
+            <div class="header-left">
+                <div class="logo-svg">
+                    <svg viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <rect width="100" height="100" rx="20" fill="#34495e"/>
+                        <text x="50" y="68" font-size="52" text-anchor="middle" fill="white" font-family="Arial, sans-serif" font-weight="700">M</text>
+                        <circle cx="72" cy="28" r="8" fill="#3498db"/>
+                        <circle cx="28" cy="72" r="6" fill="#27ae60"/>
+                        <circle cx="78" cy="72" r="5" fill="#f39c12"/>
+                    </svg>
+                </div>
+                <div class="header-text">
+                    <div class="header-title">
+                        MEGAN MOVIE API
+                        <span class="version-tag">v3.0.0</span>
+                    </div>
+                    <div class="header-subtitle">
+                        <i class="fas fa-bolt" style="color: #f39c12; font-size: 10px;"></i>
+                        <span class="typing-container">
+                            <span class="typing-text" id="typing-text">Zero-buffer streaming</span>
+                            <span class="cursor"></span>
+                        </span>
+                    </div>
+                </div>
+            </div>
+            <div class="header-badge">
+                <i class="fas fa-circle"></i>
+                <span>OAS 3.1</span>
+                <span style="margin: 0 8px; opacity: 0.5;">|</span>
+                <i class="fas fa-cloud"></i>
+                <span>300+ Edge</span>
+            </div>
+        </div>
+    </header>
+    
     <div id="swagger-ui"></div>
     
     <!-- Footer -->
@@ -594,6 +670,50 @@
     <script src="https://unpkg.com/swagger-ui-dist@5.17.14/swagger-ui-standalone-preset.js"></script>
     
     <script>
+        // Typing effect
+        const phrases = [
+            "Zero-buffer streaming",
+            "100K+ movies & TV",
+            "4K Ultra HD quality",
+            "Worldwide CDN access",
+            "Zero RAM edge compute"
+        ];
+        
+        let phraseIndex = 0;
+        let charIndex = 0;
+        let isDeleting = false;
+        const typingText = document.getElementById('typing-text');
+        
+        function typeEffect() {
+            const currentPhrase = phrases[phraseIndex];
+            
+            if (isDeleting) {
+                typingText.textContent = currentPhrase.substring(0, charIndex - 1);
+                charIndex--;
+            } else {
+                typingText.textContent = currentPhrase.substring(0, charIndex + 1);
+                charIndex++;
+            }
+            
+            if (!isDeleting && charIndex === currentPhrase.length) {
+                isDeleting = true;
+                setTimeout(typeEffect, 2000);
+                return;
+            }
+            
+            if (isDeleting && charIndex === 0) {
+                isDeleting = false;
+                phraseIndex = (phraseIndex + 1) % phrases.length;
+                setTimeout(typeEffect, 300);
+                return;
+            }
+            
+            setTimeout(typeEffect, isDeleting ? 50 : 100);
+        }
+        
+        typeEffect();
+        
+        // Swagger UI
         window.onload = function() {
             const ui = SwaggerUIBundle({
                 url: "/openapi.json",
