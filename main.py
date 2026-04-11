@@ -5,8 +5,9 @@ import httpx
 from fastapi import FastAPI, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import RedirectResponse, FileResponse, HTMLResponse, StreamingResponse
+from fastapi.responses import RedirectResponse, FileResponse, HTMLResponse
 from datetime import datetime
+from urllib.parse import urlencode
 
 if not hasattr(enum, 'StrEnum'):
     try:
@@ -58,7 +59,7 @@ if os.path.exists(static_dir):
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
 # ============================================
-# WORKER-POWERED DOWNLOAD
+# REDIRECT TO WORKER (No Proxying!)
 # ============================================
 
 @app.api_route("/api/download/{subject_id}", methods=["GET", "HEAD"])
@@ -70,62 +71,16 @@ async def api_download(
     se: int = Query(None, description="Season number"),
     ep: int = Query(None, description="Episode number")
 ):
-    """Proxied download through Megan Stream Engine"""
+    """Redirect to Megan Stream Engine for direct download (zero proxying)"""
     
     params = {"detail_path": detail_path, "resolution": resolution}
     if se is not None and ep is not None:
         params["se"] = se
         params["ep"] = ep
     
-    # Build headers - only add Range if present and not None
-    headers = {}
-    range_header = request.headers.get("Range")
-    if range_header:
-        headers["Range"] = range_header
-    
-    try:
-        async with httpx.AsyncClient(timeout=120.0, follow_redirects=True) as client:
-            response = await client.get(
-                f"{WORKER_URL}/download/{subject_id}",
-                params=params,
-                headers=headers if headers else None
-            )
-            
-            if response.status_code not in (200, 206):
-                return {"error": f"Stream engine returned {response.status_code}", "success": False}
-            
-            # Build response headers - only add non-None values
-            resp_headers = {
-                "Content-Type": response.headers.get("Content-Type", "video/mp4"),
-                "Accept-Ranges": "bytes",
-                "Cache-Control": "public, max-age=3600",
-                "Access-Control-Allow-Origin": "*",
-            }
-            
-            # Add optional headers if they exist
-            content_disp = response.headers.get("Content-Disposition")
-            if content_disp:
-                resp_headers["Content-Disposition"] = content_disp
-            
-            content_len = response.headers.get("Content-Length")
-            if content_len:
-                resp_headers["Content-Length"] = content_len
-            
-            content_range = response.headers.get("Content-Range")
-            if content_range:
-                resp_headers["Content-Range"] = content_range
-            
-            return StreamingResponse(
-                response.aiter_bytes(),
-                status_code=response.status_code,
-                headers=resp_headers
-            )
-    except Exception as e:
-        return {"error": str(e), "success": False}
+    worker_url = f"{WORKER_URL}/download/{subject_id}?{urlencode(params)}"
+    return RedirectResponse(url=worker_url)
 
-# ============================================
-# WORKER-POWERED STREAM
-# ============================================
 
 @app.api_route("/api/watch/{subject_id}", methods=["GET", "HEAD"])
 async def api_watch(
@@ -136,58 +91,18 @@ async def api_watch(
     se: int = Query(None, description="Season number"),
     ep: int = Query(None, description="Episode number")
 ):
-    """Proxied stream through Megan Stream Engine"""
+    """Redirect to Megan Stream Engine for direct streaming (zero proxying)"""
     
     params = {"detail_path": detail_path, "resolution": resolution}
     if se is not None and ep is not None:
         params["se"] = se
         params["ep"] = ep
     
-    headers = {}
-    range_header = request.headers.get("Range")
-    if range_header:
-        headers["Range"] = range_header
-    
-    try:
-        async with httpx.AsyncClient(timeout=120.0, follow_redirects=True) as client:
-            response = await client.get(
-                f"{WORKER_URL}/watch/{subject_id}",
-                params=params,
-                headers=headers if headers else None
-            )
-            
-            if response.status_code not in (200, 206):
-                return {"error": f"Stream engine returned {response.status_code}", "success": False}
-            
-            resp_headers = {
-                "Content-Type": response.headers.get("Content-Type", "video/mp4"),
-                "Accept-Ranges": "bytes",
-                "Cache-Control": "public, max-age=3600",
-                "Access-Control-Allow-Origin": "*",
-            }
-            
-            content_disp = response.headers.get("Content-Disposition")
-            if content_disp:
-                resp_headers["Content-Disposition"] = content_disp
-            
-            content_len = response.headers.get("Content-Length")
-            if content_len:
-                resp_headers["Content-Length"] = content_len
-            
-            content_range = response.headers.get("Content-Range")
-            if content_range:
-                resp_headers["Content-Range"] = content_range
-            
-            return StreamingResponse(
-                response.aiter_bytes(),
-                status_code=response.status_code,
-                headers=resp_headers
-            )
-    except Exception as e:
-        return {"error": str(e), "success": False}
+    worker_url = f"{WORKER_URL}/watch/{subject_id}?{urlencode(params)}"
+    return RedirectResponse(url=worker_url)
 
 # ============================================
-# STREAM SOURCES (JSON)
+# STREAM SOURCES (JSON) - Still Proxied
 # ============================================
 
 @app.get("/api/sources/{subject_id}")
