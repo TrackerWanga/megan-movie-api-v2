@@ -33,7 +33,7 @@ DOMAIN = "movieapi.megan.qzz.io"
 BASE_URL = f"https://{DOMAIN}"
 WORKER_URL = "https://streamapi.megan.qzz.io"
 
-app = FastAPI(title="Megan Movie API", version="3.0.0", docs_url=None, redoc_url=None)
+app = FastAPI(title="Megan Movie API", version="3.0.0", docs_url="/docs", redoc_url="/redoc")
 
 # CORS middleware
 app.add_middleware(
@@ -150,7 +150,7 @@ async def landing_page():
             return HTMLResponse(content=content)
     return HTMLResponse(content="<h1>Megan Movie API</h1><p>Welcome</p>")
 
-@app.get("/docs")
+@app.get("/old-docs")
 async def docs_redirect():
     return RedirectResponse(url="/static/index.html")
 
