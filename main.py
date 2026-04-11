@@ -2,13 +2,11 @@ import enum
 import sys
 import os
 import httpx
-import json
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import RedirectResponse, FileResponse, HTMLResponse, StreamingResponse
 from datetime import datetime
-from urllib.parse import quote, unquote
 
 if not hasattr(enum, 'StrEnum'):
     try:
@@ -30,11 +28,11 @@ from anime.router import router as anime_router
 from education.router import router as education_router
 
 # Configuration
-PRINCE_API = "https://movieapi.princetechn.com"
 DOMAIN = "movieapi.megan.qzz.io"
 BASE_URL = f"https://{DOMAIN}"
+WORKER_URL = "https://movieapi2.trackerwanga254.workers.dev"
 
-app = FastAPI(title="Megan Movie API", version="2.0.0", docs_url=None, redoc_url=None)
+app = FastAPI(title="Megan Movie API", version="3.0.0", docs_url=None, redoc_url=None)
 
 # CORS middleware
 app.add_middleware(
@@ -60,210 +58,144 @@ if os.path.exists(static_dir):
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
 # ============================================
-# HIDDEN PRINCE API PROXY
+# WORKER-POWERED DOWNLOAD (Clean)
 # ============================================
 
-async def fetch_from_prince(endpoint: str, params: dict = None):
-    """Fetch data from PRINCE API (hidden from users)"""
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        url = f"{PRINCE_API}{endpoint}"
-        response = await client.get(url, params=params)
-        return response.json()
-
-@app.get("/api/prince/search/{query}")
-async def prince_search(query: str, type: int = 1, page: int = 1):
-    """Search using PRINCE API (hidden)"""
-    result = await fetch_from_prince(f"/api/search/{query}", {"type": type, "page": page})
-    return result
-
-@app.get("/api/prince/sources/{subject_id}")
-async def prince_sources(subject_id: str, season: int = None, episode: int = None):
-    """Get sources from PRINCE API"""
-    params = {}
-    if season:
-        params["season"] = season
-    if episode:
-        params["episode"] = episode
-    result = await fetch_from_prince(f"/api/sources/{subject_id}", params)
-    return result
-
-@app.get("/api/prince/download/{subject_id}")
-async def prince_download(subject_id: str, season: int = None, episode: int = None):
-    """Get download links from PRINCE API"""
-    params = {}
-    if season:
-        params["season"] = season
-    if episode:
-        params["episode"] = episode
-    result = await fetch_from_prince(f"/api/download/{subject_id}", params)
-    return result
-
-# ============================================
-# UNIFIED SOURCES (Hides PRINCE)
-# ============================================
-
-@app.get("/api/sources/{subject_id}")
-async def get_unified_sources(subject_id: str, season: int = None, episode: int = None):
-    """Get sources - uses PRINCE API internally but hides it"""
-    params = {}
-    if season:
-        params["season"] = season
-    if episode:
-        params["episode"] = episode
-
-    prince_result = await fetch_from_prince(f"/api/sources/{subject_id}", params)
-
-    transformed = {
-        "success": True,
-        "status": 200,
-        "creator": "Megan / Wanga",
-        "domain": DOMAIN,
-        "title": prince_result.get("title", "Unknown"),
-        "subject_id": subject_id,
-        "sources": []
-    }
-
-    for source in prince_result.get("results", []):
-        provider = source.get("provider", "Unknown")
-        embed_url = source.get("embed_url", "")
-        download_url = source.get("download_url", "")
-
-        if "bcdnxw" in embed_url or "hakunaymatata" in embed_url:
-            proxied_embed = f"{BASE_URL}/api/stream?url={quote(embed_url, safe='')}"
-            proxied_download = f"{BASE_URL}/api/dl?url={quote(download_url, safe='')}&title={prince_result.get('title', 'video')}"
-        else:
-            proxied_embed = embed_url
-            proxied_download = download_url
-
-        transformed["sources"].append({
-            "provider": provider,
-            "quality": source.get("quality", "Auto"),
-            "type": source.get("type", "embed"),
-            "embed_url": proxied_embed,
-            "download_url": proxied_download
-        })
-
-    transformed["subtitles"] = prince_result.get("subtitles", [])
-    return transformed
-
-# ============================================
-# ENHANCED PROXY STREAM (Hides CDN)
-# ============================================
-
-@app.get("/api/stream")
-async def proxy_stream(url: str):
-    """Proxy stream a video URL - with working CDN headers"""
-    decoded_url = unquote(url)
+@app.get("/api/download/{subject_id}")
+async def api_download(
+    subject_id: str,
+    detail_path: str,
+    resolution: str = "720",
+    se: int = None,
+    ep: int = None
+):
+    """
+    Proxied download through Megan Stream Engine
+    - Hides Worker URL completely
+    - Forces download with proper filename
+    - Supports TV episodes with se/ep parameters
+    """
+    params = {"detail_path": detail_path, "resolution": resolution}
+    if se is not None and ep is not None:
+        params["se"] = se
+        params["ep"] = ep
     
     try:
-        cookie = None
-        try:
-            from movies.router import session as movie_session
-            if hasattr(movie_session, '_client'):
-                client = movie_session._client
-                if hasattr(client, 'cookies'):
-                    for c in client.cookies.jar:
-                        if c.name == 'token':
-                            cookie = c.value
-                            break
-        except:
-            pass
-        
-        async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
-            headers = {
-                "Origin": "https://videodownloader.site/",
-                "Referer": "https://videodownloader.site/",
-                "User-Agent": "Mozilla/5.0 (X11; Linux x86_64; rv:137.0) Gecko/20100101 Firefox/137.0",
-                "Accept": "*/*",
-            }
-            
-            if cookie:
-                headers["Cookie"] = f"token={cookie}"
-            
-            response = await client.get(decoded_url, headers=headers)
-            
-            return StreamingResponse(
-                response.aiter_bytes(),
-                status_code=response.status_code,
-                headers={
-                    "Content-Type": "video/mp4",
-                    "Cache-Control": "public, max-age=3600",
-                    "Access-Control-Allow-Origin": "*"
-                }
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            response = await client.get(
+                f"{WORKER_URL}/download/{subject_id}",
+                params=params,
+                headers={"Range": request.headers.get("Range") if hasattr(request, 'headers') else None}
             )
-    except Exception as e:
-        return {"error": str(e), "success": False}
-# ============================================
-# ENHANCED PROXY DOWNLOAD (Hides CDN)
-# ============================================
-
-@app.get("/api/dl")
-async def proxy_download(url: str, title: str = "video", quality: str = "1080p"):
-    """Proxy download a video URL - with working CDN headers"""
-    decoded_url = unquote(url)
-    print(f"⬇️ Downloading: {title} ({quality})")
-    
-    try:
-        cookie = None
-        try:
-            from movies.router import session as movie_session
-            if hasattr(movie_session, '_client'):
-                client = movie_session._client
-                if hasattr(client, 'cookies'):
-                    for c in client.cookies.jar:
-                        if c.name == 'token':
-                            cookie = c.value
-                            break
-        except:
-            pass
-        
-        async with httpx.AsyncClient(timeout=120.0, follow_redirects=True) as client:
-            headers = {
-                "Origin": "https://videodownloader.site/",
-                "Referer": "https://videodownloader.site/",
-                "User-Agent": "Mozilla/5.0 (X11; Linux x86_64; rv:137.0) Gecko/20100101 Firefox/137.0",
-                "Accept": "*/*",
-                "Accept-Encoding": "gzip, deflate",
-                "Connection": "keep-alive",
-            }
-            
-            if cookie:
-                headers["Cookie"] = f"token={cookie}"
-            
-            response = await client.get(decoded_url, headers=headers)
             
             if response.status_code != 200:
-                return {"error": f"CDN returned {response.status_code}", "success": False}
+                return {"error": f"Stream engine returned {response.status_code}", "success": False}
             
-            filename = f"{title.replace(' ', '_')}_{quality}.mp4"
+            headers = {
+                "Content-Type": response.headers.get("Content-Type", "video/mp4"),
+                "Content-Disposition": response.headers.get("Content-Disposition", ""),
+                "Accept-Ranges": "bytes",
+                "Cache-Control": "public, max-age=3600",
+                "Access-Control-Allow-Origin": "*",
+            }
+            if response.headers.get("Content-Length"):
+                headers["Content-Length"] = response.headers.get("Content-Length")
             
             return StreamingResponse(
                 response.aiter_bytes(),
                 status_code=200,
-                headers={
-                    "Content-Type": "video/mp4",
-                    "Content-Disposition": f'attachment; filename="{filename}"',
-                    "Accept-Ranges": "bytes",
-                    "Cache-Control": "public, max-age=3600",
-                    "Access-Control-Allow-Origin": "*",
-                    "Content-Length": response.headers.get("content-length", ""),
-                }
+                headers=headers
             )
     except Exception as e:
         return {"error": str(e), "success": False}
+
 # ============================================
-# LEGACY PROXY ENDPOINTS (for compatibility)
+# WORKER-POWERED STREAM (Clean)
 # ============================================
 
-@app.get("/api/proxy/dl")
-async def proxy_download_legacy(url: str, title: str = "video", quality: str = "1080p"):
-    """Legacy proxy download endpoint"""
-    return await proxy_download(url, title, quality)
+@app.get("/api/watch/{subject_id}")
+async def api_watch(
+    subject_id: str,
+    detail_path: str,
+    resolution: str = "720",
+    se: int = None,
+    ep: int = None
+):
+    """
+    Proxied stream through Megan Stream Engine
+    - Hides Worker URL completely
+    - Zero-buffer streaming
+    - Supports TV episodes with se/ep parameters
+    """
+    params = {"detail_path": detail_path, "resolution": resolution}
+    if se is not None and ep is not None:
+        params["se"] = se
+        params["ep"] = ep
+    
+    try:
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            response = await client.get(
+                f"{WORKER_URL}/watch/{subject_id}",
+                params=params,
+                headers={"Range": request.headers.get("Range") if hasattr(request, 'headers') else None}
+            )
+            
+            if response.status_code not in (200, 206):
+                return {"error": f"Stream engine returned {response.status_code}", "success": False}
+            
+            headers = {
+                "Content-Type": response.headers.get("Content-Type", "video/mp4"),
+                "Accept-Ranges": "bytes",
+                "Cache-Control": "public, max-age=3600",
+                "Access-Control-Allow-Origin": "*",
+            }
+            if response.headers.get("Content-Length"):
+                headers["Content-Length"] = response.headers.get("Content-Length")
+            if response.headers.get("Content-Range"):
+                headers["Content-Range"] = response.headers.get("Content-Range")
+            
+            return StreamingResponse(
+                response.aiter_bytes(),
+                status_code=response.status_code,
+                headers=headers
+            )
+    except Exception as e:
+        return {"error": str(e), "success": False}
 
-@app.get("/api/proxy/stream")
-async def proxy_stream_legacy(url: str):
-    """Legacy proxy stream endpoint"""
-    return await proxy_stream(url)
+# ============================================
+# STREAM SOURCES (JSON)
+# ============================================
+
+@app.get("/api/sources/{subject_id}")
+async def get_sources(
+    subject_id: str,
+    detail_path: str,
+    se: int = None,
+    ep: int = None
+):
+    """Get available stream sources from Worker"""
+    params = {"detail_path": detail_path}
+    if se is not None and ep is not None:
+        params["se"] = se
+        params["ep"] = ep
+    
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.get(
+                f"{WORKER_URL}/api/stream/{subject_id}",
+                params=params
+            )
+            if response.status_code == 200:
+                data = response.json()
+                return {
+                    "success": True,
+                    "api": "Megan Movie API",
+                    "creator": "Megan / Wanga",
+                    "data": data
+                }
+            return {"success": False, "error": f"Worker returned {response.status_code}"}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
 
 # ============================================
 # HTML PAGES
@@ -296,9 +228,31 @@ async def health_check():
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
         "service": "Megan Movie API",
-        "version": "2.0.0",
-        "domain": DOMAIN
+        "version": "3.0.0",
+        "domain": DOMAIN,
+        "stream_engine": "Megan Stream Engine (Cloudflare Workers)"
     }
+
+# ============================================
+# LEGACY COMPATIBILITY (Redirect old endpoints)
+# ============================================
+
+@app.get("/api/dl")
+async def legacy_download(url: str = None):
+    """Legacy endpoint - returns deprecation notice"""
+    return {
+        "success": False,
+        "error": "This endpoint is deprecated. Use /api/download/{subject_id}?detail_path=...",
+        "migration_note": "Check /api/movies/{title} for new URL format"
+    }
+
+@app.get("/api/proxy/dl")
+async def legacy_proxy_download():
+    return await legacy_download()
+
+@app.get("/api/prince/search/{query}")
+async def legacy_prince_search():
+    return {"success": False, "error": "Prince API integration removed. Use /api/search instead."}
 
 if __name__ == "__main__":
     import uvicorn
