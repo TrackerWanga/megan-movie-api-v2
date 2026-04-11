@@ -2,7 +2,7 @@ import enum
 import sys
 import os
 import httpx
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import RedirectResponse, FileResponse, HTMLResponse, StreamingResponse
@@ -61,13 +61,14 @@ if os.path.exists(static_dir):
 # WORKER-POWERED DOWNLOAD (Clean)
 # ============================================
 
-@app.get("/api/download/{subject_id}")
+@app.api_route("/api/download/{subject_id}", methods=["GET", "HEAD"])
 async def api_download(
     subject_id: str,
     detail_path: str,
     resolution: str = "720",
     se: int = None,
-    ep: int = None
+    ep: int = None,
+    request: Request = None
 ):
     """
     Proxied download through Megan Stream Engine
@@ -85,7 +86,7 @@ async def api_download(
             response = await client.get(
                 f"{WORKER_URL}/download/{subject_id}",
                 params=params,
-                headers={"Range": request.headers.get("Range") if hasattr(request, 'headers') else None}
+                headers={"Range": request.headers.get("Range")} if request else {}
             )
             
             if response.status_code != 200:
@@ -113,13 +114,14 @@ async def api_download(
 # WORKER-POWERED STREAM (Clean)
 # ============================================
 
-@app.get("/api/watch/{subject_id}")
+@app.api_route("/api/watch/{subject_id}", methods=["GET", "HEAD"])
 async def api_watch(
     subject_id: str,
     detail_path: str,
     resolution: str = "720",
     se: int = None,
-    ep: int = None
+    ep: int = None,
+    request: Request = None
 ):
     """
     Proxied stream through Megan Stream Engine
@@ -137,7 +139,7 @@ async def api_watch(
             response = await client.get(
                 f"{WORKER_URL}/watch/{subject_id}",
                 params=params,
-                headers={"Range": request.headers.get("Range") if hasattr(request, 'headers') else None}
+                headers={"Range": request.headers.get("Range")} if request else {}
             )
             
             if response.status_code not in (200, 206):
