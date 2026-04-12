@@ -2,7 +2,6 @@ from fastapi import APIRouter, Query, HTTPException
 from typing import Optional
 from datetime import datetime
 import httpx
-import asyncio
 
 from moviebox_api.v2 import Search, Session, MovieDetails
 from moviebox_api.v2.download import DownloadableSingleFilesDetail
@@ -32,106 +31,67 @@ def extract_image(item):
         }
     return None
 
-async def fetch_worker_detail(slug: str) -> Optional[dict]:
-    """Fetch from Worker Detail API"""
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(f"{WORKER_URL}/detail/{slug}")
-            if resp.status_code == 200:
-                return resp.json()
-    except:
-        pass
-    return None
-
-async def fetch_worker_sources(subject_id: str, detail_path: str) -> Optional[dict]:
-    """Fetch from Worker Sources API"""
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(
-                f"{WORKER_URL}/api/stream/{subject_id}",
-                params={"detail_path": detail_path}
-            )
-            if resp.status_code == 200:
-                return resp.json()
-    except:
-        pass
-    return None
-
 
 # ============================================
-# UNIFIED MOVIE ENDPOINT (Combines Python + Worker)
+# MOVIE METADATA BY ID (Python - Rich Data)
 # ============================================
 
 @router.get("/movie/{subject_id}")
-async def get_movie_unified(subject_id: str):
-    """Get complete movie details - combines Python metadata + Worker sources"""
+async def get_movie_metadata(subject_id: str):
+    """Get complete movie metadata from Python (trailer, cast, backdrop, etc.)"""
     
-    # First, try to get basic info from Worker Sources to get the title
-    worker_sources = await fetch_worker_sources(subject_id, subject_id)
-    
-    if not worker_sources:
-        raise HTTPException(status_code=404, detail="Movie not found")
-    
-    title = worker_sources.get('title', 'Unknown')
-    
-    # Get rich metadata from Python MovieBox
-    search_obj = Search(session, query=title, subject_type=SubjectType.MOVIES)
+    # Use subject_id to search for the movie
+    search_obj = Search(session, query=subject_id, subject_type=SubjectType.MOVIES)
     results = await search_obj.get_content_model()
     
     if not results.items:
-        # Fallback to basic response
-        return {
-            "success": True,
-            "api": "Megan Movie API",
-            "creator": "Megan / Wanga",
-            "data": {
-                "movie": {
-                    "id": subject_id,
-                    "title": title,
-                    "poster": None,
-                    "qualities": [s.get('resolution') for s in worker_sources.get('sources', [])],
-                    "downloads": [],
-                    "streams": []
-                }
-            }
-        }
+        raise HTTPException(status_code=404, detail="Movie not found")
     
     movie_item = results.items[0]
     detail_path = movie_item.detailPath
     
-    # Get Python full details
+    # Get full movie details from Python
     details_obj = MovieDetails(session)
     full_details = await details_obj.get_content(detail_path)
     subject = full_details.get('subject', {})
     
-    # Get Worker Detail for dubs
-    worker_detail = await fetch_worker_detail(detail_path)
+    # Get available qualities
+    available_qualities = []
+    try:
+        downloads_obj = DownloadableSingleFilesDetail(session, movie_item)
+        download_data = await downloads_obj.get_content()
+        
+        if download_data and 'downloads' in download_data:
+            for dl in download_data['downloads']:
+                quality = f"{dl.get('resolution', 'unknown')}p"
+                size_val = dl.get('size', '0')
+                try:
+                    size_mb = round(int(size_val) / 1024 / 1024, 2)
+                except:
+                    size_mb = 0
+                
+                available_qualities.append({
+                    "quality": quality,
+                    "size_mb": size_mb,
+                    "format": dl.get('format', 'mp4')
+                })
+    except Exception as e:
+        print(f"Downloads error: {e}")
     
-    # Get qualities from Worker Sources
-    qualities = []
+    # Build download/stream URLs (pointing to Worker)
     downloads = []
     streams = []
-    
-    for source in worker_sources.get('sources', []):
-        resolution = source.get('resolution', 'unknown')
-        quality = resolution if 'p' in resolution else f"{resolution}p"
-        url = source.get('url', '')
-        size_bytes = source.get('size_bytes', '0')
-        
-        try:
-            size_mb = round(int(size_bytes) / 1024 / 1024, 2)
-        except:
-            size_mb = 0
-        
-        qualities.append(quality)
+    for q in available_qualities:
+        quality = q['quality']
+        resolution = quality.replace('p', '')
         downloads.append({
             "quality": quality,
-            "size_mb": size_mb,
-            "url": f"{MEGAN_DOMAIN}/api/download/{subject_id}?detail_path={detail_path}&resolution={resolution.replace('p', '')}"
+            "size_mb": q['size_mb'],
+            "url": f"{MEGAN_DOMAIN}/api/download/{subject_id}?detail_path={detail_path}&resolution={resolution}"
         })
         streams.append({
             "quality": quality,
-            "url": f"{MEGAN_DOMAIN}/api/watch/{subject_id}?detail_path={detail_path}&resolution={resolution.replace('p', '')}"
+            "url": f"{MEGAN_DOMAIN}/api/watch/{subject_id}?detail_path={detail_path}&resolution={resolution}"
         })
     
     # Extract poster and backdrop
@@ -174,61 +134,52 @@ async def get_movie_unified(subject_id: str):
             if sub.strip():
                 subtitles.append({"language": sub.strip(), "code": sub.strip()[:2].lower()})
     
-    # Extract dubs from Worker
-    dubs = []
-    if worker_detail and worker_detail.get('metadata', {}).get('dubs'):
-        for dub in worker_detail['metadata']['dubs']:
-            dubs.append({
-                "language": dub.get('lanName'),
-                "code": dub.get('lanCode'),
-                "subject_id": dub.get('subjectId'),
-                "detail_path": dub.get('detailPath')
-            })
-    
     return {
         "success": True,
         "api": "Megan Movie API",
         "creator": "Megan / Wanga",
         "data": {
-            "movie": {
-                "id": subject_id,
-                "megan_id": generate_megan_id(subject_id),
-                "detail_path": detail_path,
-                "title": movie_item.title,
-                "year": movie_item.releaseDate.year if movie_item.releaseDate else None,
-                "release_date": movie_item.releaseDate.isoformat() if movie_item.releaseDate else None,
-                "duration": movie_item.duration,
-                "duration_minutes": movie_item.duration // 60 if movie_item.duration else None,
-                "genres": movie_item.genre if isinstance(movie_item.genre, list) else (movie_item.genre.split(',') if movie_item.genre else []),
-                "rating": movie_item.imdbRatingValue,
-                "description": subject.get('description', movie_item.description),
-                "country": subject.get('countryName'),
-                "poster": poster,
-                "backdrop": backdrop,
-                "trailer": trailer,
-                "cast": cast,
-                "subtitles": subtitles,
-                "dubs": dubs
-            },
-            "qualities": qualities,
+            "id": subject_id,
+            "megan_id": generate_megan_id(subject_id),
+            "detail_path": detail_path,
+            "title": movie_item.title,
+            "year": movie_item.releaseDate.year if movie_item.releaseDate else None,
+            "release_date": movie_item.releaseDate.isoformat() if movie_item.releaseDate else None,
+            "duration": movie_item.duration,
+            "duration_minutes": movie_item.duration // 60 if movie_item.duration else None,
+            "genres": movie_item.genre if isinstance(movie_item.genre, list) else (movie_item.genre.split(',') if movie_item.genre else []),
+            "rating": movie_item.imdbRatingValue,
+            "description": subject.get('description', movie_item.description),
+            "country": subject.get('countryName'),
+            "poster": poster,
+            "backdrop": backdrop,
+            "trailer": trailer,
+            "cast": cast,
+            "subtitles": subtitles,
+            "qualities": [q['quality'] for q in available_qualities],
             "downloads": downloads,
             "streams": streams
         }
     }
 
 
+# ============================================
+# MOVIE DOWNLOAD (Redirect to Worker)
+# ============================================
+
 @router.get("/movie/{subject_id}/download")
 async def download_movie(
     subject_id: str,
     quality: str = Query("1080p", description="360p, 480p, 720p, 1080p")
 ):
-    """Download movie by ID"""
+    """Download movie - redirects to Worker"""
     resolution = quality.replace('p', '')
     return {
         "success": True,
         "id": subject_id,
         "quality": quality,
-        "download_url": f"{MEGAN_DOMAIN}/api/download/{subject_id}?detail_path={subject_id}&resolution={resolution}"
+        "download_url": f"{MEGAN_DOMAIN}/api/download/{subject_id}?detail_path={subject_id}&resolution={resolution}",
+        "note": "Use download_url to get the file"
     }
 
 
@@ -237,30 +188,15 @@ async def stream_movie(
     subject_id: str,
     quality: str = Query("1080p", description="360p, 480p, 720p, 1080p")
 ):
-    """Stream movie by ID"""
+    """Stream movie - redirects to Worker"""
     resolution = quality.replace('p', '')
     return {
         "success": True,
         "id": subject_id,
         "quality": quality,
-        "stream_url": f"{MEGAN_DOMAIN}/api/watch/{subject_id}?detail_path={subject_id}&resolution={resolution}"
+        "stream_url": f"{MEGAN_DOMAIN}/api/watch/{subject_id}?detail_path={subject_id}&resolution={resolution}",
+        "note": "Use stream_url to play the video"
     }
-
-
-@router.get("/movie/{subject_id}/sources")
-async def get_movie_sources(subject_id: str):
-    """Get all available qualities"""
-    worker_sources = await fetch_worker_sources(subject_id, subject_id)
-    
-    if worker_sources:
-        return {
-            "success": True,
-            "id": subject_id,
-            "sources": worker_sources.get('sources', []),
-            "count": worker_sources.get('count', 0)
-        }
-    
-    return {"success": False, "error": "Failed to fetch sources", "sources": []}
 
 
 # ============================================
@@ -269,7 +205,7 @@ async def get_movie_sources(subject_id: str):
 
 @router.get("/movies/{title}")
 async def get_movie_legacy(title: str, year: Optional[int] = None):
-    """[DEPRECATED] Use /movie/{id} instead"""
+    """[DEPRECATED] Use /api/movie/{id} instead"""
     
     search_obj = Search(session, query=title, subject_type=SubjectType.MOVIES)
     results = await search_obj.get_content_model()
@@ -287,7 +223,6 @@ async def get_movie_legacy(title: str, year: Optional[int] = None):
     
     subject_id = str(movie_item.subjectId)
     
-    # Redirect to new endpoint
     return {
         "success": True,
         "deprecated": True,
