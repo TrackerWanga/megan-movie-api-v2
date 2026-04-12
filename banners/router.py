@@ -2,6 +2,7 @@ from fastapi import APIRouter, Query
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 import httpx
+import asyncio
 
 from moviebox_api.v2 import Homepage, Session
 
@@ -48,6 +49,118 @@ def get_homepage_data():
     homepage = Homepage(session)
     return homepage.get_content_model()
 
+async def fetch_worker_detail(slug: str) -> Optional[Dict]:
+    """Fetch movie detail from Worker to get the ID"""
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(f"{WORKER_URL}/detail/{slug}")
+            if resp.status_code == 200:
+                data = resp.json()
+                return data
+    except Exception as e:
+        print(f"Worker detail error for {slug}: {e}")
+    return None
+
+async def get_python_banners() -> List[Dict]:
+    """Extract banners from Python MovieBox (has subjectId directly)"""
+    home_data = await get_homepage_data()
+    banners = []
+    
+    if hasattr(home_data, 'operatingList'):
+        for item in home_data.operatingList:
+            if hasattr(item, 'type') and item.type == "BANNER":
+                if hasattr(item, 'banner') and item.banner and hasattr(item.banner, 'items'):
+                    for banner_item in item.banner.items:
+                        # Extract subjectId - Python has it!
+                        subject_id = None
+                        if hasattr(banner_item, 'subjectId') and banner_item.subjectId:
+                            subject_id = str(banner_item.subjectId)
+                        elif hasattr(banner_item, 'subject') and banner_item.subject:
+                            subject_id = str(banner_item.subject.subjectId)
+                        
+                        # Extract image from Python
+                        image_url = None
+                        if hasattr(banner_item, 'image') and banner_item.image:
+                            image_url = str(banner_item.image.url) if hasattr(banner_item.image, 'url') else None
+                        
+                        banners.append({
+                            "title": banner_item.title if hasattr(banner_item, 'title') else None,
+                            "image": {"url": image_url} if image_url else None,
+                            "subject_id": subject_id,
+                            "detail_path": banner_item.detailPath if hasattr(banner_item, 'detailPath') else None,
+                            "source": "python"
+                        })
+    
+    return banners
+
+async def get_worker_banners() -> List[Dict]:
+    """Extract banners from Worker (has better images, needs ID from detail)"""
+    banners = []
+    
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(f"{WORKER_URL}/home/banner")
+            if resp.status_code != 200:
+                return []
+            
+            data = resp.json()
+            
+            for item in data.get('featured', []):
+                slug = item.get('slug')
+                poster_url = item.get('poster_url')
+                
+                # Worker uses 'id' - fetch from detail API
+                subject_id = None
+                if slug:
+                    detail = await fetch_worker_detail(slug)
+                    if detail and detail.get('metadata'):
+                        subject_id = detail['metadata'].get('id')
+                
+                banners.append({
+                    "title": item.get('name'),
+                    "image": {"url": poster_url} if poster_url else None,
+                    "subject_id": subject_id,
+                    "detail_path": slug,
+                    "source": "worker"
+                })
+    except Exception as e:
+        print(f"Worker banner error: {e}")
+    
+    return banners
+
+async def get_unified_banners() -> List[Dict]:
+    """Get banners from both sources, deduplicate by detail_path"""
+    
+    # Fetch from both sources in parallel
+    python_banners, worker_banners = await asyncio.gather(
+        get_python_banners(),
+        get_worker_banners()
+    )
+    
+    # Combine and deduplicate (prefer Python for subject_id, Worker for image)
+    banner_map = {}
+    
+    # Process Worker banners first (better images)
+    for banner in worker_banners:
+        key = banner.get('detail_path')
+        if key:
+            banner_map[key] = banner
+    
+    # Process Python banners (better subject_id)
+    for banner in python_banners:
+        key = banner.get('detail_path')
+        if key:
+            if key in banner_map:
+                # Merge: keep Worker image, use Python subject_id
+                if banner.get('subject_id'):
+                    banner_map[key]['subject_id'] = banner['subject_id']
+                if not banner_map[key].get('image', {}).get('url') and banner.get('image', {}).get('url'):
+                    banner_map[key]['image'] = banner['image']
+            else:
+                banner_map[key] = banner
+    
+    return list(banner_map.values())
+
 # ============================================
 # COMPLETE HOMEPAGE (All Sections)
 # ============================================
@@ -55,27 +168,12 @@ def get_homepage_data():
 @router.get("/homepage")
 async def get_complete_homepage():
     """Complete homepage - Python + Worker combined"""
-
+    
     home_data = await get_homepage_data()
-
-    # Get banners from Worker (has working images!)
-    banners = []
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(f"{WORKER_URL}/home/banner")
-            if resp.status_code == 200:
-                data = resp.json()
-                for item in data.get('featured', []):
-                    poster_url = item.get('poster_url')
-                    banners.append({
-                        "title": item.get('name'),
-                        "image": {"url": poster_url} if poster_url else None,
-                        "subject_id": item.get('subject_id'),
-                        "detail_path": item.get('slug')
-                    })
-    except Exception as e:
-        print(f"Worker banner error: {e}")
-
+    
+    # Get unified banners (both sources, deduplicated)
+    banners = await get_unified_banners()
+    
     # Get Python trending
     trending = []
     if hasattr(home_data, 'operatingList'):
@@ -85,7 +183,7 @@ async def get_complete_homepage():
                     if hasattr(item, 'subjects'):
                         for subject in item.subjects:
                             trending.append(format_subject(subject))
-
+    
     # Get Python sections
     sections = {}
     section_map = {
@@ -104,7 +202,7 @@ async def get_complete_homepage():
         "upcoming": "Upcoming Calendar",
         "smartstart": "🧸 Smart Start Cartoons"
     }
-
+    
     if hasattr(home_data, 'operatingList'):
         for item in home_data.operatingList:
             if hasattr(item, 'type') and item.type in ["SUBJECTS_MOVIE", "APPOINTMENT_LIST"]:
@@ -113,7 +211,7 @@ async def get_complete_homepage():
                     if title == target_title and hasattr(item, 'subjects'):
                         sections[key] = [format_subject(s) for s in item.subjects]
                         break
-
+    
     # Get platforms
     platforms = []
     if hasattr(home_data, 'platformList'):
@@ -122,7 +220,7 @@ async def get_complete_homepage():
                 "name": item.name if hasattr(item, 'name') else None,
                 "uploaded_by": item.uploadBy if hasattr(item, 'uploadBy') else None
             })
-
+    
     # Get Worker sections (Hot, Cinema, Ranking)
     worker_data = {}
     try:
@@ -130,17 +228,17 @@ async def get_complete_homepage():
             hot_resp = await client.get(f"{WORKER_URL}/home/hot")
             if hot_resp.status_code == 200:
                 worker_data["hot"] = hot_resp.json()
-
+            
             cinema_resp = await client.get(f"{WORKER_URL}/home/cinema")
             if cinema_resp.status_code == 200:
                 worker_data["cinema"] = cinema_resp.json()
-
+            
             ranking_resp = await client.get(f"{WORKER_URL}/ranking")
             if ranking_resp.status_code == 200:
                 worker_data["ranking"] = ranking_resp.json()
     except:
         worker_data = {"hot": [], "cinema": [], "ranking": []}
-
+    
     return {
         "success": True,
         "api": "Megan Movie API",
@@ -164,30 +262,15 @@ async def get_complete_homepage():
     }
 
 # ============================================
-# MAIN BANNERS (Proxied from Worker)
+# MAIN BANNERS (Unified - Both Sources)
 # ============================================
 
 @router.get("/homepage/banners")
 async def get_main_banners():
-    """Main hero banners - proxied from Worker (has working images!)"""
+    """Main hero banners - unified from Python + Worker"""
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(f"{WORKER_URL}/home/banner")
-            if resp.status_code != 200:
-                return {"success": False, "error": "Worker unavailable", "banners": []}
-            
-            data = resp.json()
-            banners = []
-            for item in data.get('featured', []):
-                poster_url = item.get('poster_url')
-                banners.append({
-                    "title": item.get('name'),
-                    "image": {"url": poster_url} if poster_url else None,
-                    "subject_id": item.get('subject_id'),
-                    "detail_path": item.get('slug')
-                })
-            
-            return {"success": True, "total": len(banners), "banners": banners}
+        banners = await get_unified_banners()
+        return {"success": True, "total": len(banners), "banners": banners}
     except Exception as e:
         return {"success": False, "error": str(e), "banners": []}
 
@@ -199,7 +282,7 @@ async def get_main_banners():
 async def get_trending():
     """Trending content (Popular Series + Popular Movie)"""
     home_data = await get_homepage_data()
-
+    
     trending = []
     if hasattr(home_data, 'operatingList'):
         for item in home_data.operatingList:
@@ -208,7 +291,7 @@ async def get_trending():
                     if hasattr(item, 'subjects'):
                         for subject in item.subjects:
                             trending.append(format_subject(subject))
-
+    
     return {"success": True, "total": len(trending), "trending": trending}
 
 # ============================================
@@ -249,7 +332,7 @@ async def get_ranking():
         return {"success": False, "error": str(e), "ranking": []}
 
 # ============================================
-# MOVIE SECTIONS
+# MOVIE SECTIONS (Python)
 # ============================================
 
 @router.get("/homepage/action")
@@ -456,7 +539,7 @@ async def get_upcoming():
 async def get_platforms():
     """Get platform banners (Netflix, PrimeVideo, Disney, etc.)"""
     home_data = await get_homepage_data()
-
+    
     platforms = []
     if hasattr(home_data, 'platformList'):
         for item in home_data.platformList:
@@ -464,5 +547,5 @@ async def get_platforms():
                 "name": item.name if hasattr(item, 'name') else None,
                 "uploaded_by": item.uploadBy if hasattr(item, 'uploadBy') else None
             })
-
+    
     return {"success": True, "total": len(platforms), "platforms": platforms}
