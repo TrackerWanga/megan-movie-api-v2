@@ -31,11 +31,15 @@ def format_subject(subject) -> Dict:
             genres = subject.genre
         elif isinstance(subject.genre, str):
             genres = [g.strip() for g in subject.genre.split(',')]
+    
+    # Determine type
+    subject_type = subject.subjectType if hasattr(subject, 'subjectType') else None
+    type_str = "movie" if subject_type == 1 else "tv" if subject_type == 2 else "movie"
 
     return {
         "id": str(subject.subjectId) if hasattr(subject, 'subjectId') else None,
         "title": subject.title if hasattr(subject, 'title') else None,
-        "type": subject.subjectType if hasattr(subject, 'subjectType') else None,
+        "type": type_str,
         "year": subject.releaseDate.year if hasattr(subject, 'releaseDate') and subject.releaseDate else None,
         "rating": subject.imdbRatingValue if hasattr(subject, 'imdbRatingValue') else None,
         "genres": genres,
@@ -50,7 +54,7 @@ def get_homepage_data():
     return homepage.get_content_model()
 
 async def fetch_worker_detail(slug: str) -> Optional[Dict]:
-    """Fetch movie detail from Worker to get the ID"""
+    """Fetch movie detail from Worker to get ID and type"""
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.get(f"{WORKER_URL}/detail/{slug}")
@@ -62,21 +66,35 @@ async def fetch_worker_detail(slug: str) -> Optional[Dict]:
     return None
 
 async def get_python_banners() -> List[Dict]:
-    """Extract banners from Python MovieBox (has subjectId directly)"""
+    """Extract banners from Python MovieBox (has subjectId and type directly)"""
     home_data = await get_homepage_data()
     banners = []
-    
+
     if hasattr(home_data, 'operatingList'):
         for item in home_data.operatingList:
             if hasattr(item, 'type') and item.type == "BANNER":
                 if hasattr(item, 'banner') and item.banner and hasattr(item.banner, 'items'):
                     for banner_item in item.banner.items:
-                        # Extract subjectId - Python has it!
+                        # Extract subjectId and type - Python has it!
                         subject_id = None
+                        subject_type = None
+                        
                         if hasattr(banner_item, 'subjectId') and banner_item.subjectId:
                             subject_id = str(banner_item.subjectId)
                         elif hasattr(banner_item, 'subject') and banner_item.subject:
                             subject_id = str(banner_item.subject.subjectId)
+                            subject_type = banner_item.subject.subjectType
+                        
+                        # Get type directly from banner_item if not found
+                        if subject_type is None and hasattr(banner_item, 'subjectType'):
+                            subject_type = banner_item.subjectType
+                        
+                        # Determine type string
+                        type_str = "movie"
+                        if subject_type == 1:
+                            type_str = "movie"
+                        elif subject_type == 2:
+                            type_str = "tv"
                         
                         # Extract image from Python
                         image_url = None
@@ -88,15 +106,16 @@ async def get_python_banners() -> List[Dict]:
                             "image": {"url": image_url} if image_url else None,
                             "subject_id": subject_id,
                             "detail_path": banner_item.detailPath if hasattr(banner_item, 'detailPath') else None,
+                            "type": type_str,
                             "source": "python"
                         })
-    
+
     return banners
 
 async def get_worker_banners() -> List[Dict]:
-    """Extract banners from Worker (has better images, needs ID from detail)"""
+    """Extract banners from Worker (has better images, get ID and type from detail)"""
     banners = []
-    
+
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.get(f"{WORKER_URL}/home/banner")
@@ -104,62 +123,72 @@ async def get_worker_banners() -> List[Dict]:
                 return []
             
             data = resp.json()
-            
+
             for item in data.get('featured', []):
                 slug = item.get('slug')
                 poster_url = item.get('poster_url')
-                
-                # Worker uses 'id' - fetch from detail API
+
+                # Worker uses 'id' and type from detail API
                 subject_id = None
+                type_str = "movie"  # Default to movie
+                
                 if slug:
                     detail = await fetch_worker_detail(slug)
                     if detail and detail.get('metadata'):
                         subject_id = detail['metadata'].get('id')
-                
+                        # Worker detail has genre field - check if it contains "TV" or similar
+                        genre = detail['metadata'].get('genre', '').lower()
+                        if 'tv' in genre or 'series' in genre:
+                            type_str = "tv"
+
                 banners.append({
                     "title": item.get('name'),
                     "image": {"url": poster_url} if poster_url else None,
                     "subject_id": subject_id,
                     "detail_path": slug,
+                    "type": type_str,
                     "source": "worker"
                 })
     except Exception as e:
         print(f"Worker banner error: {e}")
-    
+
     return banners
 
 async def get_unified_banners() -> List[Dict]:
     """Get banners from both sources, deduplicate by detail_path"""
-    
+
     # Fetch from both sources in parallel
     python_banners, worker_banners = await asyncio.gather(
         get_python_banners(),
         get_worker_banners()
     )
-    
-    # Combine and deduplicate (prefer Python for subject_id, Worker for image)
+
+    # Combine and deduplicate (prefer Python for subject_id and type, Worker for image)
     banner_map = {}
-    
+
     # Process Worker banners first (better images)
     for banner in worker_banners:
         key = banner.get('detail_path')
         if key:
             banner_map[key] = banner
-    
-    # Process Python banners (better subject_id)
+
+    # Process Python banners (better subject_id and accurate type)
     for banner in python_banners:
         key = banner.get('detail_path')
         if key:
             if key in banner_map:
-                # Merge: keep Worker image, use Python subject_id
+                # Merge: keep Worker image, use Python subject_id and type
                 if banner.get('subject_id'):
                     banner_map[key]['subject_id'] = banner['subject_id']
+                if banner.get('type'):
+                    banner_map[key]['type'] = banner['type']
                 if not banner_map[key].get('image', {}).get('url') and banner.get('image', {}).get('url'):
                     banner_map[key]['image'] = banner['image']
             else:
                 banner_map[key] = banner
-    
+
     return list(banner_map.values())
+
 
 # ============================================
 # COMPLETE HOMEPAGE (All Sections)
@@ -168,12 +197,12 @@ async def get_unified_banners() -> List[Dict]:
 @router.get("/homepage")
 async def get_complete_homepage():
     """Complete homepage - Python + Worker combined"""
-    
+
     home_data = await get_homepage_data()
-    
+
     # Get unified banners (both sources, deduplicated)
     banners = await get_unified_banners()
-    
+
     # Get Python trending
     trending = []
     if hasattr(home_data, 'operatingList'):
@@ -183,7 +212,7 @@ async def get_complete_homepage():
                     if hasattr(item, 'subjects'):
                         for subject in item.subjects:
                             trending.append(format_subject(subject))
-    
+
     # Get Python sections
     sections = {}
     section_map = {
@@ -202,7 +231,7 @@ async def get_complete_homepage():
         "upcoming": "Upcoming Calendar",
         "smartstart": "🧸 Smart Start Cartoons"
     }
-    
+
     if hasattr(home_data, 'operatingList'):
         for item in home_data.operatingList:
             if hasattr(item, 'type') and item.type in ["SUBJECTS_MOVIE", "APPOINTMENT_LIST"]:
@@ -211,7 +240,7 @@ async def get_complete_homepage():
                     if title == target_title and hasattr(item, 'subjects'):
                         sections[key] = [format_subject(s) for s in item.subjects]
                         break
-    
+
     # Get platforms
     platforms = []
     if hasattr(home_data, 'platformList'):
@@ -220,7 +249,7 @@ async def get_complete_homepage():
                 "name": item.name if hasattr(item, 'name') else None,
                 "uploaded_by": item.uploadBy if hasattr(item, 'uploadBy') else None
             })
-    
+
     # Get Worker sections (Hot, Cinema, Ranking)
     worker_data = {}
     try:
@@ -228,17 +257,17 @@ async def get_complete_homepage():
             hot_resp = await client.get(f"{WORKER_URL}/home/hot")
             if hot_resp.status_code == 200:
                 worker_data["hot"] = hot_resp.json()
-            
+
             cinema_resp = await client.get(f"{WORKER_URL}/home/cinema")
             if cinema_resp.status_code == 200:
                 worker_data["cinema"] = cinema_resp.json()
-            
+
             ranking_resp = await client.get(f"{WORKER_URL}/ranking")
             if ranking_resp.status_code == 200:
                 worker_data["ranking"] = ranking_resp.json()
     except:
         worker_data = {"hot": [], "cinema": [], "ranking": []}
-    
+
     return {
         "success": True,
         "api": "Megan Movie API",
@@ -261,18 +290,20 @@ async def get_complete_homepage():
         }
     }
 
+
 # ============================================
 # MAIN BANNERS (Unified - Both Sources)
 # ============================================
 
 @router.get("/homepage/banners")
 async def get_main_banners():
-    """Main hero banners - unified from Python + Worker"""
+    """Main hero banners - unified from Python + Worker with type field"""
     try:
         banners = await get_unified_banners()
         return {"success": True, "total": len(banners), "banners": banners}
     except Exception as e:
         return {"success": False, "error": str(e), "banners": []}
+
 
 # ============================================
 # TRENDING
@@ -282,7 +313,7 @@ async def get_main_banners():
 async def get_trending():
     """Trending content (Popular Series + Popular Movie)"""
     home_data = await get_homepage_data()
-    
+
     trending = []
     if hasattr(home_data, 'operatingList'):
         for item in home_data.operatingList:
@@ -291,8 +322,9 @@ async def get_trending():
                     if hasattr(item, 'subjects'):
                         for subject in item.subjects:
                             trending.append(format_subject(subject))
-    
+
     return {"success": True, "total": len(trending), "trending": trending}
+
 
 # ============================================
 # WORKER SECTIONS (Hot, Cinema, Ranking)
@@ -330,6 +362,7 @@ async def get_ranking():
             return {"success": True, "source": "worker", **data}
     except Exception as e:
         return {"success": False, "error": str(e), "ranking": []}
+
 
 # ============================================
 # MOVIE SECTIONS (Python)
@@ -531,6 +564,7 @@ async def get_upcoming():
                     break
     return {"success": True, "total": len(upcoming), "upcoming": upcoming}
 
+
 # ============================================
 # PLATFORMS
 # ============================================
@@ -539,7 +573,7 @@ async def get_upcoming():
 async def get_platforms():
     """Get platform banners (Netflix, PrimeVideo, Disney, etc.)"""
     home_data = await get_homepage_data()
-    
+
     platforms = []
     if hasattr(home_data, 'platformList'):
         for item in home_data.platformList:
@@ -547,5 +581,5 @@ async def get_platforms():
                 "name": item.name if hasattr(item, 'name') else None,
                 "uploaded_by": item.uploadBy if hasattr(item, 'uploadBy') else None
             })
-    
+
     return {"success": True, "total": len(platforms), "platforms": platforms}
