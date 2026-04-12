@@ -21,28 +21,60 @@ def generate_megan_id(subject_id: str = None) -> str:
 
 
 # ============================================
-# TV SERIES METADATA BY ID (Python - Rich Data)
+# TV SERIES METADATA BY detail_path
 # ============================================
 
 @router.get("/tv/{subject_id}")
-async def get_tv_metadata(subject_id: str):
-    """Get complete TV series metadata from Python (trailer, cast, seasons, etc.)"""
+async def get_tv_metadata(subject_id: str, detail_path: str = Query(None)):
+    """Get complete TV series metadata using detail_path"""
     
-    # Search for series
-    search = Search(session, query=subject_id, subject_type=SubjectType.TV_SERIES)
-    results = await search.get_content_model()
+    # If detail_path is provided, use it directly
+    if detail_path:
+        try:
+            tv_details = TVSeriesDetails(session)
+            detail_data = await tv_details.get_content(detail_path)
+            subject = detail_data.get('subject', {})
+            resource = detail_data.get('resource', {})
+            
+            # Get series title for the response
+            title = subject.get('title', 'Unknown')
+            
+            return await build_tv_response(subject_id, detail_path, None, subject, resource, detail_data)
+        except Exception as e:
+            print(f"Error with detail_path: {e}")
     
-    if not results.items:
-        raise HTTPException(status_code=404, detail="TV series not found")
+    # Fallback: Try to get title from Worker
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                f"{WORKER_URL}/api/stream/{subject_id}",
+                params={"detail_path": subject_id}
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                title = data.get('title')
+                if title:
+                    # Search by title
+                    search = Search(session, query=title, subject_type=SubjectType.TV_SERIES)
+                    results = await search.get_content_model()
+                    if results.items:
+                        series_item = results.items[0]
+                        detail_path = series_item.detailPath
+                        
+                        tv_details = TVSeriesDetails(session)
+                        detail_data = await tv_details.get_content(detail_path)
+                        subject = detail_data.get('subject', {})
+                        resource = detail_data.get('resource', {})
+                        
+                        return await build_tv_response(subject_id, detail_path, series_item, subject, resource, detail_data)
+    except Exception as e:
+        print(f"Worker fallback error: {e}")
     
-    series_item = results.items[0]
-    detail_path = series_item.detailPath
-    
-    # Get full details from Python
-    tv_details = TVSeriesDetails(session)
-    detail_data = await tv_details.get_content(detail_path)
-    subject = detail_data.get('subject', {})
-    resource = detail_data.get('resource', {})
+    raise HTTPException(status_code=404, detail="TV series not found")
+
+
+async def build_tv_response(subject_id: str, detail_path: str, series_item, subject: dict, resource: dict, detail_data: dict):
+    """Build the complete TV series response"""
     
     # Extract seasons
     seasons_data = resource.get('seasons', [])
@@ -54,7 +86,7 @@ async def get_tv_metadata(subject_id: str):
         
         # Generate episode URLs
         episodes = []
-        for ep in range(1, min(max_ep + 1, 6)):  # First 5 episodes
+        for ep in range(1, min(max_ep + 1, 6)):
             episodes.append({
                 "episode": ep,
                 "download_url": f"{MEGAN_DOMAIN}/api/download/{subject_id}?detail_path={detail_path}&se={se}&ep={ep}&resolution=720",
@@ -111,11 +143,16 @@ async def get_tv_metadata(subject_id: str):
     
     # Extract subtitles
     subtitles = []
-    if hasattr(series_item, 'subtitles') and series_item.subtitles:
+    if series_item and hasattr(series_item, 'subtitles') and series_item.subtitles:
         subs = series_item.subtitles.split(',') if isinstance(series_item.subtitles, str) else series_item.subtitles
         for sub in subs[:20]:
             if sub.strip():
                 subtitles.append({"language": sub.strip(), "code": sub.strip()[:2].lower()})
+    
+    title = series_item.title if series_item else subject.get('title', 'Unknown')
+    year = series_item.releaseDate.year if series_item and series_item.releaseDate else None
+    rating = series_item.imdbRatingValue if series_item else None
+    genres = series_item.genre if isinstance(series_item.genre, list) else (series_item.genre.split(',') if series_item and series_item.genre else []) if series_item else []
     
     return {
         "success": True,
@@ -125,10 +162,10 @@ async def get_tv_metadata(subject_id: str):
             "id": subject_id,
             "megan_id": generate_megan_id(subject_id),
             "detail_path": detail_path,
-            "title": series_item.title,
-            "year": series_item.releaseDate.year if series_item.releaseDate else None,
-            "genres": series_item.genre if isinstance(series_item.genre, list) else (series_item.genre.split(',') if series_item.genre else []),
-            "rating": series_item.imdbRatingValue,
+            "title": title,
+            "year": year,
+            "genres": genres,
+            "rating": rating,
             "description": subject.get('description', ''),
             "poster": poster,
             "backdrop": backdrop,
@@ -146,18 +183,11 @@ async def get_tv_metadata(subject_id: str):
 # ============================================
 
 @router.get("/tv/{subject_id}/seasons")
-async def get_tv_seasons(subject_id: str):
-    """Get seasons info for a TV series"""
+async def get_tv_seasons(subject_id: str, detail_path: str = Query(...)):
+    """Get seasons info - requires detail_path"""
     
-    search = Search(session, query=subject_id, subject_type=SubjectType.TV_SERIES)
-    results = await search.get_content_model()
-    
-    if not results.items:
-        raise HTTPException(status_code=404, detail="TV series not found")
-    
-    series_item = results.items[0]
     tv_details = TVSeriesDetails(session)
-    detail_data = await tv_details.get_content(series_item.detailPath)
+    detail_data = await tv_details.get_content(detail_path)
     
     resource = detail_data.get('resource', {})
     seasons_data = resource.get('seasons', [])
@@ -173,7 +203,6 @@ async def get_tv_seasons(subject_id: str):
     return {
         "success": True,
         "id": subject_id,
-        "title": series_item.title,
         "total_seasons": len(seasons),
         "seasons": seasons
     }
@@ -186,47 +215,43 @@ async def get_tv_seasons(subject_id: str):
 @router.get("/tv/{subject_id}/episode")
 async def get_tv_episode(
     subject_id: str,
+    detail_path: str = Query(...),
     season: int = Query(..., ge=1),
     episode: int = Query(..., ge=1),
     quality: str = Query("720p", description="360p, 480p, 720p, 1080p")
 ):
-    """Get download/stream URLs for a specific episode"""
+    """Get download/stream URLs - requires detail_path"""
     
     resolution = quality.replace('p', '')
-    
-    # Get series title
-    search = Search(session, query=subject_id, subject_type=SubjectType.TV_SERIES)
-    results = await search.get_content_model()
-    title = results.items[0].title if results.items else "Unknown"
     
     return {
         "success": True,
         "id": subject_id,
-        "series": title,
         "season": season,
         "episode": episode,
         "quality": quality,
         "download": {
-            "url": f"{MEGAN_DOMAIN}/api/download/{subject_id}?detail_path={subject_id}&se={season}&ep={episode}&resolution={resolution}"
+            "url": f"{MEGAN_DOMAIN}/api/download/{subject_id}?detail_path={detail_path}&se={season}&ep={episode}&resolution={resolution}"
         },
         "stream": {
-            "url": f"{MEGAN_DOMAIN}/api/watch/{subject_id}?detail_path={subject_id}&se={season}&ep={episode}&resolution={resolution}"
+            "url": f"{MEGAN_DOMAIN}/api/watch/{subject_id}?detail_path={detail_path}&se={season}&ep={episode}&resolution={resolution}"
         }
     }
 
 
 # ============================================
-# TV DOWNLOAD (Redirect to Worker)
+# TV DOWNLOAD
 # ============================================
 
 @router.get("/tv/{subject_id}/download")
 async def download_tv(
     subject_id: str,
+    detail_path: str = Query(...),
     season: int = Query(..., ge=1),
     episode: int = Query(..., ge=1),
     quality: str = Query("720p", description="360p, 480p, 720p, 1080p")
 ):
-    """Download TV episode - redirects to Worker"""
+    """Download TV episode - requires detail_path"""
     resolution = quality.replace('p', '')
     return {
         "success": True,
@@ -234,18 +259,19 @@ async def download_tv(
         "season": season,
         "episode": episode,
         "quality": quality,
-        "download_url": f"{MEGAN_DOMAIN}/api/download/{subject_id}?detail_path={subject_id}&se={season}&ep={episode}&resolution={resolution}"
+        "download_url": f"{MEGAN_DOMAIN}/api/download/{subject_id}?detail_path={detail_path}&se={season}&ep={episode}&resolution={resolution}"
     }
 
 
 @router.get("/tv/{subject_id}/stream")
 async def stream_tv(
     subject_id: str,
+    detail_path: str = Query(...),
     season: int = Query(..., ge=1),
     episode: int = Query(..., ge=1),
     quality: str = Query("720p", description="360p, 480p, 720p, 1080p")
 ):
-    """Stream TV episode - redirects to Worker"""
+    """Stream TV episode - requires detail_path"""
     resolution = quality.replace('p', '')
     return {
         "success": True,
@@ -253,17 +279,17 @@ async def stream_tv(
         "season": season,
         "episode": episode,
         "quality": quality,
-        "stream_url": f"{MEGAN_DOMAIN}/api/watch/{subject_id}?detail_path={subject_id}&se={season}&ep={episode}&resolution={resolution}"
+        "stream_url": f"{MEGAN_DOMAIN}/api/watch/{subject_id}?detail_path={detail_path}&se={season}&ep={episode}&resolution={resolution}"
     }
 
 
 # ============================================
-# LEGACY ENDPOINTS (Deprecated)
+# LEGACY ENDPOINTS
 # ============================================
 
 @router.get("/tv/{title}")
 async def get_tv_legacy(title: str, year: Optional[int] = None):
-    """[DEPRECATED] Use /api/tv/{id} instead"""
+    """[DEPRECATED] Use search then /api/tv/{id}?detail_path={path}"""
     
     search = Search(session, query=title, subject_type=SubjectType.TV_SERIES)
     results = await search.get_content_model()
@@ -273,12 +299,14 @@ async def get_tv_legacy(title: str, year: Optional[int] = None):
     
     series_item = results.items[0]
     subject_id = str(series_item.subjectId)
+    detail_path = series_item.detailPath
     
     return {
         "success": True,
         "deprecated": True,
-        "message": "Use /api/tv/{id} instead",
+        "message": "Use search then /api/tv/{id}?detail_path={path}",
         "id": subject_id,
-        "url": f"{MEGAN_DOMAIN}/api/tv/{subject_id}"
+        "detail_path": detail_path,
+        "url": f"{MEGAN_DOMAIN}/api/tv/{subject_id}?detail_path={detail_path}"
     }
 

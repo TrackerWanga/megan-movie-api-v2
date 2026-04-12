@@ -33,27 +33,67 @@ def extract_image(item):
 
 
 # ============================================
-# MOVIE METADATA BY ID (Python - Rich Data)
+# MOVIE METADATA BY detail_path (The Correct Pattern!)
 # ============================================
 
 @router.get("/movie/{subject_id}")
-async def get_movie_metadata(subject_id: str):
-    """Get complete movie metadata from Python (trailer, cast, backdrop, etc.)"""
+async def get_movie_metadata(subject_id: str, detail_path: str = Query(None)):
+    """
+    Get complete movie metadata using detail_path.
+    If detail_path not provided, tries to fetch from Worker first.
+    """
     
-    # Use subject_id to search for the movie
-    search_obj = Search(session, query=subject_id, subject_type=SubjectType.MOVIES)
-    results = await search_obj.get_content_model()
+    # If detail_path is provided, use it directly
+    if detail_path:
+        try:
+            details_obj = MovieDetails(session)
+            full_details = await details_obj.get_content(detail_path)
+            subject = full_details.get('subject', {})
+            movie_item = None
+            
+            # We still need movie_item for qualities - search by title
+            title = subject.get('title')
+            if title:
+                search_obj = Search(session, query=title, subject_type=SubjectType.MOVIES)
+                results = await search_obj.get_content_model()
+                if results.items:
+                    movie_item = results.items[0]
+            
+            return await build_movie_response(subject_id, detail_path, movie_item, subject, full_details)
+        except Exception as e:
+            print(f"Error with detail_path: {e}")
     
-    if not results.items:
-        raise HTTPException(status_code=404, detail="Movie not found")
+    # Fallback: Try to get title from Worker Sources
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                f"{WORKER_URL}/api/stream/{subject_id}",
+                params={"detail_path": subject_id}
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                title = data.get('title')
+                if title:
+                    # Search by title
+                    search_obj = Search(session, query=title, subject_type=SubjectType.MOVIES)
+                    results = await search_obj.get_content_model()
+                    if results.items:
+                        movie_item = results.items[0]
+                        detail_path = movie_item.detailPath
+                        
+                        details_obj = MovieDetails(session)
+                        full_details = await details_obj.get_content(detail_path)
+                        subject = full_details.get('subject', {})
+                        
+                        return await build_movie_response(subject_id, detail_path, movie_item, subject, full_details)
+    except Exception as e:
+        print(f"Worker fallback error: {e}")
     
-    movie_item = results.items[0]
-    detail_path = movie_item.detailPath
-    
-    # Get full movie details from Python
-    details_obj = MovieDetails(session)
-    full_details = await details_obj.get_content(detail_path)
-    subject = full_details.get('subject', {})
+    raise HTTPException(status_code=404, detail="Movie not found")
+
+
+async def build_movie_response(subject_id: str, detail_path: str, movie_item, subject: dict, full_details: dict):
+    """Build the complete movie response"""
     
     # Get available qualities
     available_qualities = []
@@ -78,7 +118,7 @@ async def get_movie_metadata(subject_id: str):
     except Exception as e:
         print(f"Downloads error: {e}")
     
-    # Build download/stream URLs (pointing to Worker)
+    # Build download/stream URLs
     downloads = []
     streams = []
     for q in available_qualities:
@@ -95,10 +135,10 @@ async def get_movie_metadata(subject_id: str):
         })
     
     # Extract poster and backdrop
-    poster = extract_image(movie_item)
+    poster = extract_image(movie_item) if movie_item else None
     
     backdrop = None
-    if hasattr(movie_item, 'stills') and movie_item.stills:
+    if movie_item and hasattr(movie_item, 'stills') and movie_item.stills:
         backdrop = {
             "url": str(movie_item.stills.url),
             "width": movie_item.stills.width,
@@ -128,11 +168,14 @@ async def get_movie_metadata(subject_id: str):
     
     # Extract subtitles
     subtitles = []
-    if hasattr(movie_item, 'subtitles') and movie_item.subtitles:
+    if movie_item and hasattr(movie_item, 'subtitles') and movie_item.subtitles:
         subs = movie_item.subtitles.split(',') if isinstance(movie_item.subtitles, str) else movie_item.subtitles
         for sub in subs[:20]:
             if sub.strip():
                 subtitles.append({"language": sub.strip(), "code": sub.strip()[:2].lower()})
+    
+    title = movie_item.title if movie_item else subject.get('title', 'Unknown')
+    year = movie_item.releaseDate.year if movie_item and movie_item.releaseDate else None
     
     return {
         "success": True,
@@ -142,14 +185,14 @@ async def get_movie_metadata(subject_id: str):
             "id": subject_id,
             "megan_id": generate_megan_id(subject_id),
             "detail_path": detail_path,
-            "title": movie_item.title,
-            "year": movie_item.releaseDate.year if movie_item.releaseDate else None,
-            "release_date": movie_item.releaseDate.isoformat() if movie_item.releaseDate else None,
-            "duration": movie_item.duration,
-            "duration_minutes": movie_item.duration // 60 if movie_item.duration else None,
-            "genres": movie_item.genre if isinstance(movie_item.genre, list) else (movie_item.genre.split(',') if movie_item.genre else []),
-            "rating": movie_item.imdbRatingValue,
-            "description": subject.get('description', movie_item.description),
+            "title": title,
+            "year": year,
+            "release_date": movie_item.releaseDate.isoformat() if movie_item and movie_item.releaseDate else None,
+            "duration": movie_item.duration if movie_item else None,
+            "duration_minutes": movie_item.duration // 60 if movie_item and movie_item.duration else None,
+            "genres": movie_item.genre if isinstance(movie_item.genre, list) else (movie_item.genre.split(',') if movie_item and movie_item.genre else []) if movie_item else [],
+            "rating": movie_item.imdbRatingValue if movie_item else None,
+            "description": subject.get('description', ''),
             "country": subject.get('countryName'),
             "poster": poster,
             "backdrop": backdrop,
@@ -170,15 +213,16 @@ async def get_movie_metadata(subject_id: str):
 @router.get("/movie/{subject_id}/download")
 async def download_movie(
     subject_id: str,
+    detail_path: str = Query(...),
     quality: str = Query("1080p", description="360p, 480p, 720p, 1080p")
 ):
-    """Download movie - redirects to Worker"""
+    """Download movie - requires detail_path from search"""
     resolution = quality.replace('p', '')
     return {
         "success": True,
         "id": subject_id,
         "quality": quality,
-        "download_url": f"{MEGAN_DOMAIN}/api/download/{subject_id}?detail_path={subject_id}&resolution={resolution}",
+        "download_url": f"{MEGAN_DOMAIN}/api/download/{subject_id}?detail_path={detail_path}&resolution={resolution}",
         "note": "Use download_url to get the file"
     }
 
@@ -186,15 +230,16 @@ async def download_movie(
 @router.get("/movie/{subject_id}/stream")
 async def stream_movie(
     subject_id: str,
+    detail_path: str = Query(...),
     quality: str = Query("1080p", description="360p, 480p, 720p, 1080p")
 ):
-    """Stream movie - redirects to Worker"""
+    """Stream movie - requires detail_path from search"""
     resolution = quality.replace('p', '')
     return {
         "success": True,
         "id": subject_id,
         "quality": quality,
-        "stream_url": f"{MEGAN_DOMAIN}/api/watch/{subject_id}?detail_path={subject_id}&resolution={resolution}",
+        "stream_url": f"{MEGAN_DOMAIN}/api/watch/{subject_id}?detail_path={detail_path}&resolution={resolution}",
         "note": "Use stream_url to play the video"
     }
 
@@ -205,7 +250,7 @@ async def stream_movie(
 
 @router.get("/movies/{title}")
 async def get_movie_legacy(title: str, year: Optional[int] = None):
-    """[DEPRECATED] Use /api/movie/{id} instead"""
+    """[DEPRECATED] Use search then /api/movie/{id}?detail_path={path}"""
     
     search_obj = Search(session, query=title, subject_type=SubjectType.MOVIES)
     results = await search_obj.get_content_model()
@@ -222,12 +267,14 @@ async def get_movie_legacy(title: str, year: Optional[int] = None):
         movie_item = results.items[0]
     
     subject_id = str(movie_item.subjectId)
+    detail_path = movie_item.detailPath
     
     return {
         "success": True,
         "deprecated": True,
-        "message": "Use /api/movie/{id} instead",
+        "message": "Use search then /api/movie/{id}?detail_path={path}",
         "id": subject_id,
-        "url": f"{MEGAN_DOMAIN}/api/movie/{subject_id}"
+        "detail_path": detail_path,
+        "url": f"{MEGAN_DOMAIN}/api/movie/{subject_id}?detail_path={detail_path}"
     }
 
