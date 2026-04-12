@@ -22,148 +22,14 @@ def generate_megan_id(subject_id: str = None) -> str:
 
 
 # ============================================
-# TV SERIES METADATA (Fast - No Episodes)
+# COMPLETE TV SERIES (Everything at Once!)
 # ============================================
 
 @router.get("/tv/{subject_id}")
-async def get_tv_metadata(subject_id: str, detail_path: str = Query(None)):
+async def get_tv_complete(subject_id: str, detail_path: str = Query(None)):
     """
-    Get TV series metadata WITHOUT episode URLs (fast).
-    Use /tv/{id}/season/{season} to get episode URLs.
-    """
-    
-    if detail_path:
-        try:
-            tv_details = TVSeriesDetails(session)
-            detail_data = await tv_details.get_content(detail_path)
-            subject = detail_data.get('subject', {})
-            resource = detail_data.get('resource', {})
-            
-            return await build_tv_response(subject_id, detail_path, subject, resource, detail_data, include_episodes=False)
-        except Exception as e:
-            print(f"Error with detail_path: {e}")
-    
-    raise HTTPException(status_code=404, detail="TV series not found")
-
-
-# ============================================
-# TV SEASON WITH EPISODE URLs (Lazy Loaded)
-# ============================================
-
-@router.get("/tv/{subject_id}/season/{season}")
-async def get_tv_season_episodes(
-    subject_id: str,
-    season: int,
-    detail_path: str = Query(...),
-    quality: str = Query("720p", description="360p, 480p, 720p, 1080p")
-):
-    """
-    Get episodes for a specific season WITH download/stream URLs.
-    This is called when the user expands a season.
-    """
-    
-    resolution = quality.replace('p', '')
-    
-    # Get series_item for downloads
-    search = Search(session, query=subject_id, subject_type=SubjectType.TV_SERIES)
-    results = await search.get_content_model()
-    
-    if not results.items:
-        raise HTTPException(status_code=404, detail="TV series not found")
-    
-    series_item = results.items[0]
-    
-    episodes = []
-    
-    try:
-        # Get season info to know max episodes
-        tv_details = TVSeriesDetails(session)
-        detail_data = await tv_details.get_content(detail_path)
-        resource = detail_data.get('resource', {})
-        seasons_data = resource.get('seasons', [])
-        
-        target_season = None
-        for s in seasons_data:
-            if s.get('se') == season:
-                target_season = s
-                break
-        
-        if not target_season:
-            raise HTTPException(status_code=404, detail=f"Season {season} not found")
-        
-        max_ep = target_season.get('maxEp', 0)
-        
-        # Fetch download URLs for each episode
-        for ep in range(1, max_ep + 1):
-            try:
-                downloads_obj = DownloadableTVSeriesFilesDetail(session, series_item)
-                download_data = await downloads_obj.get_content(season=season, episode=ep)
-                
-                download_url = None
-                size_mb = 0
-                
-                if download_data and 'downloads' in download_data:
-                    # Find the requested quality or best available
-                    for dl in download_data['downloads']:
-                        dl_quality = f"{dl.get('resolution')}p"
-                        if dl_quality == quality:
-                            download_url = dl.get('url')
-                            size_bytes = dl.get('size', 0)
-                            try:
-                                size_mb = round(int(size_bytes) / 1024 / 1024, 2)
-                            except:
-                                size_mb = 0
-                            break
-                    
-                    # If requested quality not found, use first available
-                    if not download_url and download_data['downloads']:
-                        best = download_data['downloads'][0]
-                        download_url = best.get('url')
-                        size_bytes = best.get('size', 0)
-                        try:
-                            size_mb = round(int(size_bytes) / 1024 / 1024, 2)
-                        except:
-                            size_mb = 0
-                
-                episodes.append({
-                    "episode": ep,
-                    "name": f"Episode {ep}",
-                    "download_url": f"{MEGAN_DOMAIN}/api/download/{subject_id}?detail_path={detail_path}&se={season}&ep={ep}&resolution={resolution}" if download_url else None,
-                    "stream_url": f"{MEGAN_DOMAIN}/api/watch/{subject_id}?detail_path={detail_path}&se={season}&ep={ep}&resolution={resolution}",
-                    "size_mb": size_mb
-                })
-                
-            except Exception as e:
-                print(f"Error fetching episode {ep}: {e}")
-                episodes.append({
-                    "episode": ep,
-                    "name": f"Episode {ep}",
-                    "download_url": f"{MEGAN_DOMAIN}/api/download/{subject_id}?detail_path={detail_path}&se={season}&ep={ep}&resolution={resolution}",
-                    "stream_url": f"{MEGAN_DOMAIN}/api/watch/{subject_id}?detail_path={detail_path}&se={season}&ep={ep}&resolution={resolution}",
-                    "size_mb": 0
-                })
-    
-    except Exception as e:
-        print(f"Error getting season data: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to get episodes: {str(e)}")
-    
-    return {
-        "success": True,
-        "season": season,
-        "quality": quality,
-        "episodes": episodes
-    }
-
-
-# ============================================
-# ALL SEASONS WITH EPISODES (Full Load - Slower)
-# ============================================
-
-@router.get("/tv/{subject_id}/full")
-async def get_tv_full(subject_id: str, detail_path: str = Query(None)):
-    """
-    Get COMPLETE TV series with all episodes for all seasons.
-    WARNING: This is slow! Use /tv/{id} + /tv/{id}/season/{season} for better UX.
+    Get COMPLETE TV series with ALL seasons and ALL episodes with download/stream URLs.
+    Frontend can lazy load the display - all data is already loaded!
     """
     
     if detail_path:
@@ -179,62 +45,107 @@ async def get_tv_full(subject_id: str, detail_path: str = Query(None)):
             results = await search.get_content_model()
             series_item = results.items[0] if results.items else None
             
-            return await build_tv_response(subject_id, detail_path, subject, resource, detail_data, 
-                                          series_item=series_item, include_episodes=True)
+            return await build_complete_tv_response(subject_id, detail_path, subject, resource, detail_data, series_item)
         except Exception as e:
             print(f"Error with detail_path: {e}")
+    
+    # Fallback: Try to get title from Worker
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                f"{WORKER_URL}/api/stream/{subject_id}",
+                params={"detail_path": subject_id}
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                title = data.get('title')
+                if title:
+                    search = Search(session, query=title, subject_type=SubjectType.TV_SERIES)
+                    results = await search.get_content_model()
+                    if results.items:
+                        series_item = results.items[0]
+                        detail_path = series_item.detailPath
+                        
+                        tv_details = TVSeriesDetails(session)
+                        detail_data = await tv_details.get_content(detail_path)
+                        subject = detail_data.get('subject', {})
+                        resource = detail_data.get('resource', {})
+                        
+                        return await build_complete_tv_response(subject_id, detail_path, subject, resource, detail_data, series_item)
+    except Exception as e:
+        print(f"Worker fallback error: {e}")
     
     raise HTTPException(status_code=404, detail="TV series not found")
 
 
-async def build_tv_response(
+async def build_complete_tv_response(
     subject_id: str, 
     detail_path: str, 
     subject: dict, 
     resource: dict, 
     detail_data: dict,
-    series_item=None,
-    include_episodes: bool = False
+    series_item
 ):
-    """Build the TV series response"""
+    """Build the complete TV series response with ALL episodes"""
     
-    # Extract seasons metadata
+    # Extract seasons with ALL episodes
     seasons_data = resource.get('seasons', [])
     seasons = []
+    
+    print(f"Building complete TV response for: {subject.get('title', 'Unknown')}")
     
     for season in seasons_data:
         se = season.get('se', 0)
         max_ep = season.get('maxEp', 0)
         resolutions = season.get('resolutions', [])
         
-        season_obj = {
-            "season": se,
-            "max_episodes": max_ep,
-            "available_qualities": [r.get('resolution') for r in resolutions],
-            "episodes": []
-        }
+        episodes = []
         
-        # Only fetch episodes if requested (slow!)
-        if include_episodes and series_item:
-            for ep in range(1, min(max_ep + 1, 11)):  # Max 10 episodes per season
+        # Fetch ALL episodes for this season
+        if series_item and max_ep > 0:
+            for ep in range(1, max_ep + 1):
                 try:
                     downloads_obj = DownloadableTVSeriesFilesDetail(session, series_item)
                     download_data = await downloads_obj.get_content(season=se, episode=ep)
                     
                     download_url = None
-                    if download_data and 'downloads' in download_data and download_data['downloads']:
-                        download_url = download_data['downloads'][0].get('url')
+                    size_mb = 0
                     
-                    season_obj["episodes"].append({
+                    if download_data and 'downloads' in download_data and download_data['downloads']:
+                        best = download_data['downloads'][0]
+                        download_url = best.get('url')
+                        size_bytes = best.get('size', 0)
+                        try:
+                            size_mb = round(int(size_bytes) / 1024 / 1024, 2)
+                        except:
+                            size_mb = 0
+                    
+                    episodes.append({
                         "episode": ep,
                         "name": f"Episode {ep}",
                         "download_url": f"{MEGAN_DOMAIN}/api/download/{subject_id}?detail_path={detail_path}&se={se}&ep={ep}&resolution=720" if download_url else None,
-                        "stream_url": f"{MEGAN_DOMAIN}/api/watch/{subject_id}?detail_path={detail_path}&se={se}&ep={ep}&resolution=720"
+                        "stream_url": f"{MEGAN_DOMAIN}/api/watch/{subject_id}?detail_path={detail_path}&se={se}&ep={ep}&resolution=720",
+                        "size_mb": size_mb
                     })
-                except:
-                    pass
+                    
+                except Exception as e:
+                    print(f"  Error fetching S{se}E{ep}: {e}")
+                    episodes.append({
+                        "episode": ep,
+                        "name": f"Episode {ep}",
+                        "download_url": f"{MEGAN_DOMAIN}/api/download/{subject_id}?detail_path={detail_path}&se={se}&ep={ep}&resolution=720",
+                        "stream_url": f"{MEGAN_DOMAIN}/api/watch/{subject_id}?detail_path={detail_path}&se={se}&ep={ep}&resolution=720",
+                        "size_mb": 0
+                    })
         
-        seasons.append(season_obj)
+        seasons.append({
+            "season": se,
+            "max_episodes": max_ep,
+            "available_qualities": [r.get('resolution') for r in resolutions],
+            "episodes": episodes
+        })
+        
+        print(f"  Season {se}: {len(episodes)} episodes loaded")
     
     # Extract poster
     cover = subject.get('cover', {})
@@ -301,6 +212,8 @@ async def build_tv_response(
     genres_str = subject.get('genre', '')
     genres = [g.strip() for g in genres_str.split(',')] if genres_str else []
     
+    print(f"✅ Complete TV response built: {title} - {len(seasons)} seasons")
+    
     return {
         "success": True,
         "api": "Megan Movie API",
@@ -321,18 +234,18 @@ async def build_tv_response(
             "subtitles": subtitles,
             "seasons": seasons,
             "total_seasons": len(seasons),
-            "note": "Use /api/tv/{id}/season/{season}?detail_path={path} to get episode download/stream URLs" if not include_episodes else None
+            "total_episodes": sum(s['max_episodes'] for s in seasons)
         }
     }
 
 
 # ============================================
-# TV SEASONS (Metadata only - Fast)
+# TV SEASONS (Metadata only)
 # ============================================
 
 @router.get("/tv/{subject_id}/seasons")
 async def get_tv_seasons(subject_id: str, detail_path: str = Query(...)):
-    """Get seasons metadata only (no episode URLs)"""
+    """Get seasons metadata only (no episodes)"""
     
     tv_details = TVSeriesDetails(session)
     detail_data = await tv_details.get_content(detail_path)
