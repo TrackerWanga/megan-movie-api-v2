@@ -32,7 +32,6 @@ async def get_tv_metadata(subject_id: str, detail_path: str = Query(None)):
     Use /tv/{id}/season/{season} to get episode URLs.
     """
     
-    # If detail_path is provided, use it directly
     if detail_path:
         try:
             tv_details = TVSeriesDetails(session)
@@ -43,32 +42,6 @@ async def get_tv_metadata(subject_id: str, detail_path: str = Query(None)):
             return await build_tv_response(subject_id, detail_path, subject, resource, detail_data, include_episodes=False)
         except Exception as e:
             print(f"Error with detail_path: {e}")
-    
-    # Fallback: Try to get title from Worker
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(
-                f"{WORKER_URL}/api/stream/{subject_id}",
-                params={"detail_path": subject_id}
-            )
-            if resp.status_code == 200:
-                data = resp.json()
-                title = data.get('title')
-                if title:
-                    search = Search(session, query=title, subject_type=SubjectType.TV_SERIES)
-                    results = await search.get_content_model()
-                    if results.items:
-                        series_item = results.items[0]
-                        detail_path = series_item.detailPath
-                        
-                        tv_details = TVSeriesDetails(session)
-                        detail_data = await tv_details.get_content(detail_path)
-                        subject = detail_data.get('subject', {})
-                        resource = detail_data.get('resource', {})
-                        
-                        return await build_tv_response(subject_id, detail_path, subject, resource, detail_data, include_episodes=False)
-    except Exception as e:
-        print(f"Worker fallback error: {e}")
     
     raise HTTPException(status_code=404, detail="TV series not found")
 
@@ -91,7 +64,7 @@ async def get_tv_season_episodes(
     
     resolution = quality.replace('p', '')
     
-    # Need the series_item for DownloadableTVSeriesFilesDetail
+    # Get series_item for downloads
     search = Search(session, query=subject_id, subject_type=SubjectType.TV_SERIES)
     results = await search.get_content_model()
     
@@ -127,7 +100,6 @@ async def get_tv_season_episodes(
                 download_data = await downloads_obj.get_content(season=season, episode=ep)
                 
                 download_url = None
-                stream_url = None
                 size_mb = 0
                 
                 if download_data and 'downloads' in download_data:
@@ -153,14 +125,11 @@ async def get_tv_season_episodes(
                         except:
                             size_mb = 0
                 
-                # Build stream URL (redirects to Worker)
-                stream_url = f"{MEGAN_DOMAIN}/api/watch/{subject_id}?detail_path={detail_path}&se={season}&ep={ep}&resolution={resolution}"
-                
                 episodes.append({
                     "episode": ep,
                     "name": f"Episode {ep}",
-                    "download_url": download_url,
-                    "stream_url": stream_url,
+                    "download_url": f"{MEGAN_DOMAIN}/api/download/{subject_id}?detail_path={detail_path}&se={season}&ep={ep}&resolution={resolution}" if download_url else None,
+                    "stream_url": f"{MEGAN_DOMAIN}/api/watch/{subject_id}?detail_path={detail_path}&se={season}&ep={ep}&resolution={resolution}",
                     "size_mb": size_mb
                 })
                 
@@ -169,9 +138,9 @@ async def get_tv_season_episodes(
                 episodes.append({
                     "episode": ep,
                     "name": f"Episode {ep}",
-                    "download_url": None,
+                    "download_url": f"{MEGAN_DOMAIN}/api/download/{subject_id}?detail_path={detail_path}&se={season}&ep={ep}&resolution={resolution}",
                     "stream_url": f"{MEGAN_DOMAIN}/api/watch/{subject_id}?detail_path={detail_path}&se={season}&ep={ep}&resolution={resolution}",
-                    "error": str(e)
+                    "size_mb": 0
                 })
     
     except Exception as e:
@@ -180,11 +149,9 @@ async def get_tv_season_episodes(
     
     return {
         "success": True,
-        "id": subject_id,
         "season": season,
         "quality": quality,
-        "episodes": episodes,
-        "count": len(episodes)
+        "episodes": episodes
     }
 
 
@@ -231,7 +198,7 @@ async def build_tv_response(
 ):
     """Build the TV series response"""
     
-    # Extract seasons metadata (always included)
+    # Extract seasons metadata
     seasons_data = resource.get('seasons', [])
     seasons = []
     
@@ -261,7 +228,7 @@ async def build_tv_response(
                     season_obj["episodes"].append({
                         "episode": ep,
                         "name": f"Episode {ep}",
-                        "download_url": download_url,
+                        "download_url": f"{MEGAN_DOMAIN}/api/download/{subject_id}?detail_path={detail_path}&se={se}&ep={ep}&resolution=720" if download_url else None,
                         "stream_url": f"{MEGAN_DOMAIN}/api/watch/{subject_id}?detail_path={detail_path}&se={se}&ep={ep}&resolution=720"
                     })
                 except:
@@ -310,7 +277,7 @@ async def build_tv_response(
             "avatar": star.get('avatarUrl')
         })
     
-    # Extract subtitles (from subject if available)
+    # Extract subtitles
     subtitles = []
     if series_item and hasattr(series_item, 'subtitles') and series_item.subtitles:
         subs = series_item.subtitles.split(',') if isinstance(series_item.subtitles, str) else series_item.subtitles
@@ -354,7 +321,7 @@ async def build_tv_response(
             "subtitles": subtitles,
             "seasons": seasons,
             "total_seasons": len(seasons),
-            "note": "Use /api/tv/{id}/season/{season} to get episode download/stream URLs" if not include_episodes else None
+            "note": "Use /api/tv/{id}/season/{season}?detail_path={path} to get episode download/stream URLs" if not include_episodes else None
         }
     }
 
@@ -383,7 +350,6 @@ async def get_tv_seasons(subject_id: str, detail_path: str = Query(...)):
     
     return {
         "success": True,
-        "id": subject_id,
         "total_seasons": len(seasons),
         "seasons": seasons
     }
@@ -446,14 +412,13 @@ async def get_tv_episode(
     
     return {
         "success": True,
-        "id": subject_id,
         "season": season,
         "episode": episode,
         "quality": quality,
         "download": {
-            "url": download_url,
+            "url": f"{MEGAN_DOMAIN}/api/download/{subject_id}?detail_path={detail_path}&se={season}&ep={episode}&resolution={resolution}" if download_url else None,
             "size_mb": size_mb
-        } if download_url else None,
+        },
         "stream": {
             "url": f"{MEGAN_DOMAIN}/api/watch/{subject_id}?detail_path={detail_path}&se={season}&ep={episode}&resolution={resolution}"
         }
@@ -476,10 +441,6 @@ async def download_tv(
     resolution = quality.replace('p', '')
     return {
         "success": True,
-        "id": subject_id,
-        "season": season,
-        "episode": episode,
-        "quality": quality,
         "download_url": f"{MEGAN_DOMAIN}/api/download/{subject_id}?detail_path={detail_path}&se={season}&ep={episode}&resolution={resolution}"
     }
 
@@ -496,10 +457,6 @@ async def stream_tv(
     resolution = quality.replace('p', '')
     return {
         "success": True,
-        "id": subject_id,
-        "season": season,
-        "episode": episode,
-        "quality": quality,
         "stream_url": f"{MEGAN_DOMAIN}/api/watch/{subject_id}?detail_path={detail_path}&se={season}&ep={episode}&resolution={resolution}"
     }
 
